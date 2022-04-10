@@ -44,3 +44,4 @@ tmp/
 null
 
 metals.sbt
+.bloop/

@@ -16,7 +16,7 @@
  * License along with this library.
  */
 
-package mylib
+package miniooo
 
 import spinal.core._
 import spinal.lib._
@@ -24,7 +24,7 @@ import spinal.lib._
 import scala.util.Random
 
 //Hardware definition
-class MyTopLevel extends Component {
+class MiniOoO extends Component {
   val io = new Bundle {
     val cond0 = in  Bool()
     val cond1 = in  Bool()
@@ -41,17 +41,17 @@ class MyTopLevel extends Component {
   io.flag  := (counter === 0) | io.cond1
 }
 
-//Generate the MyTopLevel's Verilog
-object MyTopLevelVerilog {
+//Generate the MiniOoO's Verilog
+object MiniOoOVerilog {
   def main(args: Array[String]) {
-    SpinalVerilog(new MyTopLevel)
+    SpinalVerilog(new MiniOoO)
   }
 }
 
-//Generate the MyTopLevel's VHDL
-object MyTopLevelVhdl {
+//Generate the MiniOoO's VHDL
+object MiniOoOVhdl {
   def main(args: Array[String]) {
-    SpinalVhdl(new MyTopLevel)
+    SpinalVhdl(new MiniOoO)
   }
 }
 
@@ -59,9 +59,9 @@ object MyTopLevelVhdl {
 //Define a custom SpinalHDL configuration with synchronous reset instead of the default asynchronous one. This configuration can be resued everywhere
 object MySpinalConfig extends SpinalConfig(defaultConfigForClockDomains = ClockDomainConfig(resetKind = SYNC))
 
-//Generate the MyTopLevel's Verilog using the above custom configuration.
-object MyTopLevelVerilogWithCustomConfig {
+//Generate the MiniOoO's Verilog using the above custom configuration.
+object MiniOoOVerilogWithSyncReset {
   def main(args: Array[String]) {
-    MySpinalConfig.generateVerilog(new MyTopLevel)
+    MySpinalConfig.generateVerilog(new MiniOoO)
   }
 }
