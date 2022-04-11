@@ -9,7 +9,6 @@ case class DispatchedInsn(
     parentContextType: () => Bundle with DerefToInsn
 ) extends Bundle
     with DerefToInsn {
-  val insn = ctx.sem.newDecodedInsn()
   val parentContext = parentContextType()
   val robIndex = ctx.cfg.robEntryIndexType
 }
@@ -24,13 +23,12 @@ case class RobEntry(
 }
 
 case class Dispatch(
-    ctx: MachineContext,
-    insnInputType: () => Bundle with DerefToInsn
+    ctx: MachineContext
 ) extends Area {
-  val outInsnType = () => DispatchedInsn(ctx, insnInputType)
+  val outInsnType = () => DispatchedInsn(ctx, ctx.rename.renamedInsnType)
 
   val io = new Bundle {
-    val insnInput = Stream(insnInputType())
+    val insnInput = Stream(ctx.rename.renamedInsnType())
     val insnOutput = Stream(outInsnType())
     val commitInput =
       Vec(Stream(CommitRequest(ctx.cfg)), ctx.sem.functionUnits.size)
@@ -54,18 +52,17 @@ case class Dispatch(
     val full = ptrEq && risingOccupancy
     val banks =
       (0 until ctx.cfg.commitWidth).map(_ =>
-        RatMem(RobEntry(ctx, insnInputType), robBankSize)
+        RatMem(RobEntry(ctx, ctx.rename.renamedInsnType), robBankSize)
       )
 
     val dispatchPushLogic = new Area {
       val output = outInsnType()
-      output.insn := io.insnInput.payload.insn
       output.parentContext := io.insnInput.payload
       output.robIndex := pushPtr
       io.insnOutput << io.insnInput.translateWith(output).continueWhen(!full)
 
       val assignedBankIndex = getBankIndexForPtr(pushPtr)
-      val newEntry = RobEntry(ctx, insnInputType)
+      val newEntry = RobEntry(ctx, ctx.rename.renamedInsnType)
       newEntry.parentContext := io.insnInput.payload
       newEntry.commitRequest.assignDontCare()
       newEntry.completed := False
@@ -105,7 +102,7 @@ case class Dispatch(
 
       commit.io.output.freeRun()
 
-      val selectedEntry = RobEntry(ctx, insnInputType)
+      val selectedEntry = RobEntry(ctx, ctx.rename.renamedInsnType)
       val selectedEntryValid = False
 
       for ((b, i) <- banks.zipWithIndex) {
@@ -203,7 +200,8 @@ case class Dispatch(
 
             st.allocatable := True
             ctx.rename.cmt.write(dstRegArch.index, dstRegPhys)
-            ctx.rename.cmtAllowMask.write(ctx.rename.cmt(dstRegArch.index), True)
+            ctx.rename.cmtAllowMask
+              .write(ctx.rename.cmt(dstRegArch.index), True)
             ctx.rename.cmtAllowMask.write(dstRegPhys, False)
           }
         }

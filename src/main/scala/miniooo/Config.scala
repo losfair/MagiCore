@@ -12,7 +12,8 @@ case class MachineConfig(
     numPhysicalRegs: Int,
     dataWidth: BitCount,
     commitWidth: Int,
-    robSize: Int
+    robSize: Int,
+    issueQueueSize: Int
 ) {
   def archRegIndexWidth = log2Up(numArchitecturalRegs) bits
   def physRegIndexWidth = log2Up(numPhysicalRegs) bits
@@ -61,7 +62,6 @@ case class MaybeArchRegIndex(cfg: MachineConfig) extends Bundle {
 }
 
 abstract class DecodedInsn(cfg: MachineConfig) extends Bundle with DerefToInsn {
-  def insn: DecodedInsn = this
   def pc: UInt = cfg.pcType
   def parentContext: DecodedInsn = this
   def archSrcRegs: Vec[MaybeArchRegIndex]

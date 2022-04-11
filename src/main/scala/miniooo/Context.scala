@@ -16,5 +16,8 @@ case class MachineContext(
   }
 
   val rename = Rename(this, sem.newDecodedInsn)
-  val dispatch = Dispatch(this, rename.renamedInsnType)
+  val dispatch = Dispatch(this)
+  dispatch.io.insnInput << rename.io.output
+
+  val issue = Issue(this)
 }

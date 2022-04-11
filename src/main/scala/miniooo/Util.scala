@@ -5,7 +5,7 @@ import spinal.lib._
 
 trait DerefToInsn {
   def parentContext: DerefToInsn
-  def insn: DecodedInsn
+  def insn: DecodedInsn = chainLookup()
 
   def chainLookup[T](): T = {
     try {

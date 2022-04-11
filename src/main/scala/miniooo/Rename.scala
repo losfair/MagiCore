@@ -9,7 +9,6 @@ case class RenamedInsn(
     parentContextType: () => Bundle with DerefToInsn
 ) extends Bundle
     with DerefToInsn {
-  val insn = ctx.sem.newDecodedInsn()
   val parentContext = parentContextType()
   val physSrcRegs =
     Vec(ctx.cfg.physRegIndexType, ctx.cfg.maxNumSrcRegsPerInsn)
@@ -65,7 +64,6 @@ case class Rename(
   }
 
   val output = renamedInsnType()
-  output.insn := io.input.payload.insn
   output.parentContext := io.input.payload
   output.physSrcRegs := Vec(
     io.input.payload.insn.insn.archSrcRegs.map(entry => rmt(entry.index))
