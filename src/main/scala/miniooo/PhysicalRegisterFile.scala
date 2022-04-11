@@ -44,9 +44,12 @@ object PhysRegState {
 case class PrfStateTableSnapshot(ctx: MachineContext) extends Bundle {
   val table = Vec(PhysRegState(ctx), ctx.cfg.numPhysicalRegs)
 
-  def findFreeReg(): (Bool, UInt) = {
+  def findFreeReg(allowMask: Vec[Bool]): (Bool, UInt) = {
     val (ok, index) = this.table.zipWithIndex
-      .map(x => (x._1.allocatable, U(x._2, ctx.cfg.archRegIndexWidth)))
+      .drop(1) // do not allocate the zeroth register
+      .map(x =>
+        (x._1.allocatable & allowMask(x._2), U(x._2, ctx.cfg.archRegIndexWidth))
+      )
       .reduceBalancedTree((a, b) => {
         val ok = Bool()
         val index = ctx.cfg.physRegIndexType

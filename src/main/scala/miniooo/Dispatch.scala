@@ -203,6 +203,8 @@ case class Dispatch(
 
             st.allocatable := True
             ctx.rename.cmt.write(dstRegArch.index, dstRegPhys)
+            ctx.rename.cmtAllowMask.write(ctx.rename.cmt(dstRegArch.index), True)
+            ctx.rename.cmtAllowMask.write(dstRegPhys, False)
           }
         }
 

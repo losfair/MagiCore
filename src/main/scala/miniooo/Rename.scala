@@ -38,6 +38,15 @@ case class Rename(
       Reg(ctx.cfg.physRegIndexType) init (0),
       ctx.cfg.numArchitecturalRegs
     )
+  val rmtAllowMask = Vec(Reg(Bool()) init(true), ctx.cfg.numPhysicalRegs)
+
+  // Check RMT invariants
+  for (i <- 0 until ctx.cfg.numArchitecturalRegs) {
+    assert(rmt(i) === 0 || rmtAllowMask(rmt(i)) === False)
+    for (j <- i + 1 until ctx.cfg.numArchitecturalRegs) {
+      assert(rmt(i) === 0 || rmt(i) =/= rmt(j), "RMT is not a bijection")
+    }
+  }
 
   // Committed Map Table
   val cmt =
@@ -45,6 +54,15 @@ case class Rename(
       Reg(ctx.cfg.physRegIndexType) init (0),
       ctx.cfg.numArchitecturalRegs
     )
+  val cmtAllowMask = Vec(Reg(Bool()) init(true), ctx.cfg.numPhysicalRegs)
+
+  // Check CMT invariants
+  for (i <- 0 until ctx.cfg.numArchitecturalRegs) {
+    assert(cmt(i) === 0 || cmtAllowMask(cmt(i)) === False)
+    for (j <- i + 1 until ctx.cfg.numArchitecturalRegs) {
+      assert(cmt(i) === 0 || cmt(i) =/= cmt(j), "CMT is not a bijection")
+    }
+  }
 
   val output = renamedInsnType()
   output.insn := io.input.payload.insn
@@ -57,7 +75,7 @@ case class Rename(
   var allocOk = True
   output.physDstRegs := Vec(
     io.input.payload.insn.insn.archDstRegs.map(entry => {
-      val (thisAllocOk, index) = currentPrfState.findFreeReg()
+      val (thisAllocOk, index) = currentPrfState.findFreeReg(rmtAllowMask)
       allocOk = entry.valid.mux(
         True -> (allocOk && thisAllocOk),
         False -> allocOk
@@ -81,6 +99,8 @@ case class Rename(
     ) {
       when(arch.valid) {
         rmt.write(arch.index, phys)
+        rmtAllowMask.write(rmt(arch.index), True)
+        rmtAllowMask.write(phys, False)
       }
     }
   }
