@@ -39,4 +39,31 @@ object MiniOoOExt {
     })
     fresh
   }
+
+  implicit class VecExt[T <: Data](vec: Vec[T]) {
+    def rotateLeft(n: UInt): Vec[T] = {
+      assert(isPow2(vec.size))
+      val out = Vec(vec.dataType, vec.size)
+      for (i <- 0 until vec.size) {
+        out.write(i, vec(n.resize(log2Up(vec.size)) + i))
+      }
+      out
+    }
+
+    def rotateRight(n: UInt): Vec[T] = {
+      assert(isPow2(vec.size))
+      val out = Vec(vec.dataType, vec.size)
+      for (i <- 0 until vec.size) {
+        out.write(
+          i,
+          vec(
+            n.resize(log2Up(vec.size))
+              .twoComplement(True)
+              .asUInt + (i + vec.size)
+          )
+        )
+      }
+      out
+    }
+  }
 }

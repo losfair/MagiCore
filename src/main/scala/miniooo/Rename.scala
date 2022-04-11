@@ -53,18 +53,18 @@ case class Rename(
     io.input.payload.insn.insn.archSrcRegs.map(entry => rmt(entry.index))
   )
 
-  var currentBusyTable = ctx.prf.busyTable
+  var currentPrfState = ctx.prfState
   var allocOk = True
   output.physDstRegs := Vec(
     io.input.payload.insn.insn.archDstRegs.map(entry => {
-      val (thisAllocOk, index) = currentBusyTable.findFreeReg()
+      val (thisAllocOk, index) = currentPrfState.findFreeReg()
       allocOk = entry.valid.mux(
         True -> (allocOk && thisAllocOk),
         False -> allocOk
       )
-      currentBusyTable = entry.valid.mux(
-        True -> currentBusyTable.markAsBusy(index),
-        False -> currentBusyTable
+      currentPrfState = entry.valid.mux(
+        True -> currentPrfState.markAsBusy(index),
+        False -> currentPrfState
       )
       index
     })
@@ -72,9 +72,9 @@ case class Rename(
 
   io.output << io.input.translateWith(output).continueWhen(allocOk)
 
-  // Speculatively commit RMT update
+  // Speculatively write RMT update
   when(io.output.fire) {
-    ctx.prf.busyTable := currentBusyTable
+    ctx.prfState := currentPrfState
     for (
       (arch, phys) <- io.input.payload.insn.insn.archDstRegs
         .zip(output.physDstRegs)
