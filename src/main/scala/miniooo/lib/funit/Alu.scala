@@ -42,7 +42,7 @@ case class Alu(staticTag: Data, c: AluConfig) extends FunctionUnit {
       val b = op.useConst ? op.const.asUInt | issue.srcRegData(1).asUInt
       out.robAddr := dispatchInfo.robIndex
 
-      val outValue = UInt(out.regWriteValue.getWidth bits)
+      val outValue = UInt(out.regWriteValue(0).getWidth bits)
       outValue.assignDontCare()
 
       switch(op.opcode) {
@@ -65,12 +65,12 @@ case class Alu(staticTag: Data, c: AluConfig) extends FunctionUnit {
 
       if (c.alu32) {
         when(op.alu32) {
-          out.regWriteValue := outValue(31 downto 0).asBits.resized
+          out.regWriteValue(0) := outValue(31 downto 0).asBits.resized
         } otherwise {
-          out.regWriteValue := outValue.asBits
+          out.regWriteValue(0) := outValue.asBits
         }
       } else {
-        out.regWriteValue := outValue.asBits
+        out.regWriteValue(0) := outValue.asBits
       }
 
       io_output << io_input.translateWith(out)

@@ -10,7 +10,7 @@ case class DispatchInfo(hardType: HardType[_ <: PolymorphicDataChain])
     with PolymorphicDataChain {
   private val spec = Machine.get[MachineSpec]
   val robIndex = spec.robEntryIndexType()
-  val parentObjects = if(hardType != null) Seq(hardType()) else Seq()
+  val parentObjects = if (hardType != null) Seq(hardType()) else Seq()
 }
 
 case class CommitRequest(hardType: HardType[_ <: PolymorphicDataChain])
@@ -18,12 +18,15 @@ case class CommitRequest(hardType: HardType[_ <: PolymorphicDataChain])
     with PolymorphicDataChain {
   private val spec = Machine.get[MachineSpec]
   val robAddr = spec.robEntryIndexType()
-  val regWriteValue = spec.dataType
-  val parentObjects = if(hardType != null) Seq(hardType()) else Seq()
+  val regWriteValue = Vec(
+    (0 until spec.maxNumDstRegsPerInsn).map(_ => spec.dataType)
+  )
+  val parentObjects = if (hardType != null) Seq(hardType()) else Seq()
 }
 
-case class RobEntry(hardType: HardType[_ <: PolymorphicDataChain]) extends Bundle {
-  val commitRequest = CommitRequest(hardType) setCompositeName(this, "cr")
+case class RobEntry(hardType: HardType[_ <: PolymorphicDataChain])
+    extends Bundle {
+  val commitRequest = CommitRequest(hardType) setCompositeName (this, "cr")
   val completed = Bool()
 }
 
@@ -66,7 +69,9 @@ case class DispatchUnit[T <: PolymorphicDataChain](
     val empty = ptrEq && !risingOccupancy
     val full = ptrEq && risingOccupancy
     val banks =
-      (0 until spec.commitWidth).map(_ => RatMem(HardType(robEntryType), robBankSize))
+      (0 until spec.commitWidth).map(_ =>
+        RatMem(HardType(robEntryType), robBankSize)
+      )
     val prfIf = Machine.get[PrfInterface]
 
     val dispatchPushLogic = new Area {
@@ -114,13 +119,20 @@ case class DispatchUnit[T <: PolymorphicDataChain](
       val selectedEntryValid = False
 
       selectedEntry.assignDontCare()
-      println("entry width: " + selectedEntry.getBitsWidth)
+      println("ROB entry width: " + selectedEntry.getBitsWidth)
+      println("CommitReq width: " + commit.payload.getBitsWidth)
 
       for ((b, i) <- banks.zipWithIndex) {
         val oldEntry = b.readAsync(address = assignedEntryIndex)
         val newEntry = robEntryType
         newEntry.completed := True
-        newEntry.commitRequest := oldEntry.commitRequest
+        newEntry.commitRequest.parentObjects
+          .zip(oldEntry.commitRequest.parentObjects)
+          .foreach { case (n, o) =>
+            n := o
+          }
+        newEntry.commitRequest.regWriteValue := commit.payload.regWriteValue
+        newEntry.commitRequest.robAddr := commit.payload.robAddr
 
         val fireNow = assignedBankIndex === i && commit.valid
         b.write(
@@ -141,12 +153,14 @@ case class DispatchUnit[T <: PolymorphicDataChain](
 
       // Write to physical regfile
       for (
-        (dstRegPhys, dstRegArch) <- renameInfo.physDstRegs.zip(
-          decodeInfo.archDstRegs
-        )
+        ((dstRegPhys, dstRegArch), valueToWrite) <- renameInfo.physDstRegs
+          .zip(
+            decodeInfo.archDstRegs
+          )
+          .zip(commit.regWriteValue)
       ) {
         val prfItem = PrfItem()
-        prfItem.data := commit.regWriteValue
+        prfItem.data := valueToWrite
 
         val shouldWrite = dstRegArch.valid && selectedEntryValid
         prfIf.write(
@@ -177,7 +191,10 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           .map(arg => {
             var (addr_, index) = arg
             val out = ReadOutput()
-            out.addr := (addr_.asBits ## B(index, log2Up(spec.commitWidth) bits)).asUInt
+            out.addr := (addr_.asBits ## B(
+              index,
+              log2Up(spec.commitWidth) bits
+            )).asUInt
             out.data := banks(index).readAsync(address = addr_)
             out
           })
@@ -187,6 +204,8 @@ case class DispatchUnit[T <: PolymorphicDataChain](
       // Continuous ready entries
       var entryReady = True
       val renameIf = Machine.get[RenameInterface]
+      val debugCyc = Reg(UInt(64 bits)) init (0)
+      debugCyc := debugCyc + 1
 
       for (i <- 0 until spec.commitWidth) {
         val entryData = readOutput(i)
@@ -198,13 +217,11 @@ case class DispatchUnit[T <: PolymorphicDataChain](
         val decodeInfo = entryData.data.commitRequest.lookup[DecodeInfo]
 
         for (
-          (dstRegPhys, dstRegArch) <- renameInfo.physDstRegs.zip(
-            decodeInfo.archDstRegs
-          )
+          (dstRegPhys, dstRegArch) <- renameInfo.physDstRegs
+            .zip(
+              decodeInfo.archDstRegs
+            )
         ) {
-          val prfItem = PrfItem()
-          prfItem.data := entryData.data.commitRequest.regWriteValue
-
           val shouldWrite = dstRegArch.valid && entryReady
           when(shouldWrite) {
             val st = prfIf.state.table(dstRegPhys)
@@ -224,6 +241,33 @@ case class DispatchUnit[T <: PolymorphicDataChain](
         when(entryReady) {
           risingOccupancy := False
           popPtr := entryData.addr + 1
+
+          report(
+            Seq(
+              "committed rob entry cyc=",
+              debugCyc,
+              " at ",
+              entryData.addr
+            ) ++ renameInfo.physDstRegs
+              .zip(
+                decodeInfo.archDstRegs
+              )
+              .zip(entryData.data.commitRequest.regWriteValue)
+              .flatMap(arg => {
+                val ((phys, arch), value) = arg
+                Seq(
+                  "[v=",
+                  arch.valid,
+                  ",phys=",
+                  phys,
+                  ",arch=",
+                  arch.index,
+                  ",value=",
+                  value,
+                  "]"
+                )
+              })
+          )
         }
       }
     }

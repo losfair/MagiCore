@@ -49,7 +49,7 @@ case class Multiplier(staticTag: Data, c: MultiplierConfig) extends FunctionUnit
       val stage1 = stream.translateWith(stage1Payload).stage()
 
       out.robAddr := stage1.payload.robIndex
-      out.regWriteValue := stage1.payload.value
+      out.regWriteValue(0) := stage1.payload.value
       io_output << stage1.translateWith(out)
     }
   }

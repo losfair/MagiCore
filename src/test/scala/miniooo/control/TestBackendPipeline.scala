@@ -91,9 +91,11 @@ class TestBackendPipeline extends AnyFunSuite {
     def create(
         out: MockPayload,
         t: Int,
-        rs1: Option[Int],
-        rs2: Option[Int],
-        rd: Option[Int]
+        rs1: Option[Int] = None,
+        rs2: Option[Int] = None,
+        rd: Option[Int] = None,
+        const: Option[BigInt] = None,
+        opc: SpinalEnumElement[GenericOpcode.type]
     ) {
       out.decode.archSrcRegs(0).valid #= rs1.isDefined
       out.decode.archSrcRegs(0).index #= rs1.getOrElse(0)
@@ -102,6 +104,9 @@ class TestBackendPipeline extends AnyFunSuite {
       out.decode.archDstRegs(0).valid #= rd.isDefined
       out.decode.archDstRegs(0).index #= rd.getOrElse(0)
       out.decode.functionUnitTag.asInstanceOf[TestTag].tag #= t
+      out.const #= const.getOrElse(BigInt(0))
+      out.useConst #= const.isDefined
+      out.opc #= opc
     }
   }
 
@@ -112,17 +117,62 @@ class TestBackendPipeline extends AnyFunSuite {
     val io = new Bundle {
       val input = slave(Stream(MockPayload()))
 
-      val regReadAddr = in(Machine.get[MachineSpec].physRegIndexType)
+      val regReadAddr = in(Machine.get[MachineSpec].archRegIndexType)
       val regReadData = out(Machine.get[MachineSpec].dataType)
     }
     io.input >> pipeline.io.input
     val prfIf = Machine.get[PrfInterface]
-    io.regReadData := prfIf.readAsync(io.regReadAddr).data
+    io.regReadData := prfIf.readAsync(pipeline.rename.cmt(io.regReadAddr)).data
   }
 
   test("TestBackendPipeline") {
     SimConfig.withWave.doSim(
       rtl = Machine.build { new TestBackendPipelineTop() }
-    ) { dut => }
+    ) { dut =>
+      dut.io.input.valid #= false
+
+      dut.clockDomain.forkStimulus(100)
+      waitUntil(dut.clockDomain.isResetAsserted)
+      waitUntil(dut.clockDomain.isResetDeasserted)
+
+      dut.io.input.simWrite(dut, p => {
+        MockPayload.create(p, t = 0, rs1 = Some(0), rs2 = Some(0), rd = Some(0), opc = GenericOpcode.XOR) // zero out r0
+      })
+
+      dut.io.input.simWrite(dut, p => {
+        MockPayload.create(p, t = 0, rs1 = Some(1), rs2 = Some(1), rd = Some(1), opc = GenericOpcode.XOR) // zero out r1
+      })
+
+      dut.io.input.simWrite(dut, p => {
+        MockPayload.create(p, t = 0, rs1 = Some(2), rs2 = Some(2), rd = Some(2), opc = GenericOpcode.XOR) // zero out r2
+      })
+
+      dut.io.input.simWrite(dut, p => {
+        MockPayload.create(p, t = 0, rs1 = Some(1), rs2 = None, rd = Some(1), opc = GenericOpcode.ADD, const = Some(11)) // r1 = 11
+      })
+
+      dut.io.input.simWrite(dut, p => {
+        MockPayload.create(p, t = 0, rs1 = Some(2), rs2 = None, rd = Some(2), opc = GenericOpcode.ADD, const = Some(42)) // r2 = 42
+      })
+
+      dut.io.input.simWrite(dut, p => {
+        MockPayload.create(p, t = 1, rs1 = Some(1), rs2 = Some(2), rd = Some(4), opc = GenericOpcode.ADD) // r4 = r1 * r2
+      })
+
+      dut.io.input.simWrite(dut, p => {
+        MockPayload.create(p, t = 0, rs1 = Some(1), rs2 = Some(2), rd = Some(3), opc = GenericOpcode.ADD) // r3 = r1 + r2
+      })
+
+      dut.io.input.simWrite(dut, p => {
+        MockPayload.create(p, t = 0, rs1 = Some(4), rs2 = Some(3), rd = Some(5), opc = GenericOpcode.ADD) // r5 = r4 + r3
+      })
+
+      dut.clockDomain.waitSampling(1000)
+
+      dut.io.regReadAddr #= 5
+      dut.clockDomain.waitSampling()
+      assert(dut.io.regReadData.toBigInt == 42 * 11 + 42 + 11)
+      println("validation ok")
+    }
   }
 }
