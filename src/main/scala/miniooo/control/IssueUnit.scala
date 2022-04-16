@@ -51,6 +51,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
 
   case class IqTag() extends Bundle {
     val valid = Bool()
+    val priority = UInt(log2Up(spec.issueQueueSize) bits)
     val dependencies = Vec(IqDependency(), spec.maxNumSrcRegsPerInsn)
 
     def canIssue = valid && dependencies.map(x => !x.valid || x.wakeUp).andR
@@ -60,6 +61,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
     def idle: IqTag = {
       val tag = IqTag()
       tag.valid := False
+      tag.priority.assignDontCare()
       for (i <- 0 until spec.maxNumSrcRegsPerInsn) {
         tag.dependencies(i) := IqDependency.idle
       }
@@ -81,7 +83,24 @@ case class IssueQueue[T <: PolymorphicDataChain](
     }
   }
 
-  val rrPopIndex = Reg(UInt(log2Up(spec.issueQueueSize) bits)) init (0)
+  val incPriority = Bool()
+  when(incPriority) {
+    for (t <- iqTagSpace) {
+      when(t.priority =/= t.priority.maxValue) {
+        t.priority := t.priority + 1
+      }
+    }
+  }
+
+  // Verification
+  {
+    val prev = Vec(iqTagSpace.map(x => RegNext(next = x, init = IqTag.idle)))
+    for ((prev, next) <- prev.zip(iqTagSpace)) {
+      when(prev.valid && !prev.canIssue && !next.valid) {
+        assert(False, "detected invalid issue event")
+      }
+    }
+  }
 
   def push(enable: Bool, data: T): (Bool, UInt) = {
     val t = IqTag()
@@ -89,6 +108,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
     val decodeInfo = data.lookup[DecodeInfo]
 
     t.valid := True
+    t.priority := 0
     t.dependencies := Vec(
       decodeInfo.archSrcRegs
         .map(_.valid)
@@ -131,6 +151,8 @@ case class IssueQueue[T <: PolymorphicDataChain](
       }
     }
 
+    incPriority := notFull & enable
+
     assert((notFull && allocated === 1) || (!notFull && allocated === 0))
     (notFull & enable, iqDataAddr)
   }
@@ -146,6 +168,8 @@ case class IssueQueue[T <: PolymorphicDataChain](
         x.valid,
         " i=",
         x.canIssue,
+        " prio=",
+        x.priority,
         " deps=["
       ) ++ x.dependencies.flatMap(y =>
         Seq("(", "v=", y.valid, " idx=", y.physRegIndex, " w=", y.wakeUp, ")")
@@ -154,27 +178,35 @@ case class IssueQueue[T <: PolymorphicDataChain](
   }
 
   def queryPop(): (Bool, UInt) = {
-    val x = iqTagSpace.zipWithIndex
-    val (rrMatch, rrFirst) = iqTagSpace.zipWithIndex.firstWhere(
-      hardType = HardType(indexType),
-      predicate = x => x._1.canIssue && rrPopIndex <= x._2,
-      generate = x => U(x._2, indexSize)
-    )
-    val (seqMatch, seqFirst) = iqTagSpace.zipWithIndex.firstWhere(
-      hardType = HardType(indexType),
-      predicate = x => x._1.canIssue,
-      generate = x => U(x._2, indexSize)
-    )
+    val (_, index, ok) = iqTagSpace.zipWithIndex
+      .map({ case (x, i) => (x.priority, U(i, indexSize), x.canIssue) })
+      .reduceBalancedTree((l, r) => {
+        val prio = UInt(l._1.getWidth bits)
+        val index = indexType
+        when(l._3 && r._3) {
+          when(l._1 <= r._1) {
+            prio := l._1
+            index := l._2
+          } otherwise {
+            prio := r._1
+            index := r._2
+          }
+        } elsewhen (l._3) {
+          prio := l._1
+          index := l._2
+        } otherwise {
+          prio := r._1
+          index := r._2
+        }
 
-    val ok = rrMatch || seqMatch
-    val index = rrMatch ? rrFirst | seqFirst
+        (prio, index, l._3 | r._3)
+      })
 
     (ok, index)
   }
 
   def commitPop(index: UInt) {
     assert(iqTagSpace(index).valid)
-    rrPopIndex := index + 1
     iqTagSpace(index).valid := False
   }
 }
@@ -274,9 +306,9 @@ case class IssueUnit[T <: PolymorphicDataChain](
       assert(issueCount === 1)
     }
 
-    when(unifiedIssuePort.fire) {
-      //report(Seq("issued - mask ", issueOk.asBits, " iq index ", index))
-      //report(iq.report())
-    }
+    /*when(unifiedIssuePort.fire) {
+      report(Seq("issued - mask ", issueOk.asBits, " iq index ", index))
+      report(iq.report())
+    }*/
   }
 }

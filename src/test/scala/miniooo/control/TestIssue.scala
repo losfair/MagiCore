@@ -10,6 +10,7 @@ import miniooo.util.PolymorphicDataChain
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 import miniooo.testutil.TestExt._
+import scala.collection.mutable
 
 class TestIssue extends AnyFunSuite {
   val mspec = MachineSpec(
@@ -175,9 +176,11 @@ class TestIssue extends AnyFunSuite {
         }
       }
 
-      val freeRegs = Random
+      val writableRegs = Random
         .shuffle((1 until mspec.numPhysicalRegs).map(x => x))
         .to[ArrayBuffer]
+      val readRefCount =
+        (0 until mspec.numPhysicalRegs).map(_ => 0).to[ArrayBuffer]
 
       val regContentMirror =
         (0 until mspec.numPhysicalRegs)
@@ -201,7 +204,7 @@ class TestIssue extends AnyFunSuite {
         )
       }
 
-      println("Initialized " + freeRegs.size + " registers.")
+      println("Initialized " + writableRegs.size + " registers.")
 
       for (i <- 0 until numFunctionUnits) {
         val fuIndex = i
@@ -255,10 +258,12 @@ class TestIssue extends AnyFunSuite {
                   data = outputData
                 )
             )
-            freeRegs += dstRegIndex
+            writableRegs += dstRegIndex
+            assert(readRefCount(srcRegIndex) > 0)
+            readRefCount.update(srcRegIndex, readRefCount(srcRegIndex) - 1)
             outputActive = false
             /*println(
-              "Function unit " + fuIndex + " wrote to register " + dstRegIndex + " value " + outputData + " " + freeRegs
+              "Function unit " + fuIndex + " wrote to register " + dstRegIndex + " value " + outputData + " src " + srcRegIndex + " " + writableRegs
             )*/
           }
         }
@@ -276,13 +281,25 @@ class TestIssue extends AnyFunSuite {
         )
       }
 
-      for (i <- 0 until 500) {
-        while (freeRegs.size < 1) {
-          dut.clockDomain.waitSampling() // wait for available registers
+      for (i <- 0 until 1000) {
+        var maybeDstRegIndex: Option[Int] = None
+        while (maybeDstRegIndex.isEmpty) {
+          val it =
+            writableRegs.zipWithIndex.find(arg => readRefCount(arg._1) == 0)
+          it match {
+            case Some((regIndex, arrayIndex)) => {
+              writableRegs.remove(arrayIndex)
+              maybeDstRegIndex = Some(regIndex)
+            }
+            case None => {
+              dut.clockDomain.waitSampling()
+            }
+          }
         }
+        val dstRegIndex = maybeDstRegIndex.get
         dut.clockDomain.waitSampling(Random.nextInt(10))
-        val dstRegIndex = freeRegs.pop()
         var srcRegIndex = Random.nextInt(dstRegIndex)
+        readRefCount.update(srcRegIndex, readRefCount(srcRegIndex) + 1)
         val funcUnit = Random.nextInt(numFunctionUnits)
         /*println(
           "selected fu=" + funcUnit + " src=" + srcRegIndex + "(" + regContentMirror(
@@ -319,13 +336,20 @@ class TestIssue extends AnyFunSuite {
         regContentMirror.update(dstRegIndex, regContentMirror(srcRegIndex) + 1)
       }
       println("waiting for completion")
-      dut.clockDomain.waitSampling(200)
+      dut.clockDomain.waitSampling(1000) // XXX: Figure this out dynamically?
 
-      for (i <- 0 until mspec.numPhysicalRegs) {
+      val actual = (0 until mspec.numPhysicalRegs).map(i => {
         dut.io.regReadAddr #= i
         dut.clockDomain.waitSampling()
+        dut.io.regReadData.toBigInt
+      })
+
+      //println("actual: " + actual)
+      //println("expected: " + regContentMirror)
+
+      for (i <- 0 until mspec.numPhysicalRegs) {
         assert(
-          dut.io.regReadData.toBigInt == regContentMirror(i),
+          actual(i) == regContentMirror(i),
           "register " + i + " has wrong value"
         )
       }
