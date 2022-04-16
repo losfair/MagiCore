@@ -6,6 +6,7 @@ import scala.reflect._
 
 trait PolymorphicDataChain extends Data {
   def parentObjects: Seq[_ <: Data]
+  def decodeAs[T <: AnyRef](ctag: ClassTag[T]): Option[T] = None
 
   private def doLookup[T <: AnyRef](ctag: ClassTag[T]): T = {
     try {
@@ -13,13 +14,21 @@ trait PolymorphicDataChain extends Data {
     } catch {
       case _: ClassCastException => {}
     }
+
+    val decoded = this.decodeAs(ctag)
+    if (decoded.isDefined) {
+      return decoded.get
+    }
+
     if (this.parentObjects != null) {
       for (obj <- this.parentObjects) {
-        try {
-          val x = obj.asInstanceOf[PolymorphicDataChain].doLookup[T](ctag)
-          if (x != null) return x
-        } catch {
-          case _: ClassCastException => {}
+        if (obj != null) {
+          try {
+            val x = obj.asInstanceOf[PolymorphicDataChain].doLookup[T](ctag)
+            if (x != null) return x
+          } catch {
+            case _: ClassCastException => {}
+          }
         }
       }
     }

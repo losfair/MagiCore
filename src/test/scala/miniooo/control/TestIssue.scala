@@ -20,7 +20,9 @@ class TestIssue extends AnyFunSuite {
     maxNumSrcRegsPerInsn = 2,
     maxNumDstRegsPerInsn = 1,
     issueQueueSize = 32,
-    functionUnitTagType = HardType(TestTag())
+    functionUnitTagType = HardType(TestTag()),
+    robSize = 2,
+    commitWidth = 1
   )
   val numFunctionUnits = 4
 

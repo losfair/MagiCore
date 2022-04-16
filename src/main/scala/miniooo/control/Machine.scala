@@ -11,7 +11,9 @@ case class MachineSpec(
     maxNumSrcRegsPerInsn: Int,
     maxNumDstRegsPerInsn: Int,
     issueQueueSize: Int,
-    functionUnitTagType: HardType[_ <: Data]
+    functionUnitTagType: HardType[_ <: Data],
+    robSize: Int,
+    commitWidth: Int
 ) {
   def dataType = Bits(dataWidth)
 
@@ -19,6 +21,14 @@ case class MachineSpec(
   def physRegIndexWidth = log2Up(numPhysicalRegs) bits
   def archRegIndexType = UInt(archRegIndexWidth)
   def physRegIndexType = UInt(physRegIndexWidth)
+
+  def robEntryIndexWidth = log2Up(robSize) bits
+  val robEntryIndexType = HardType(UInt(robEntryIndexWidth))
+}
+
+abstract class MachineSemantics {
+  def functionUnits: Seq[FunctionUnit]
+  def numFunctionUnits = functionUnits.size
 }
 
 object Machine {

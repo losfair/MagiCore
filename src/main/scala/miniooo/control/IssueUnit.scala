@@ -222,9 +222,11 @@ case class IssueUnit[T <: PolymorphicDataChain](
     val data = dataType()
   }
 
+  val issueDataType = IssuePort(dataType)
+
   val io = new Bundle {
     val input = Stream(dataType())
-    val issuePorts = Vec(Stream(IssuePort(dataType)), c.portSpecs.size)
+    val issuePorts = Vec(Stream(issueDataType), c.portSpecs.size)
   }
 
   val iq = IssueQueue(dataType)
@@ -272,7 +274,7 @@ case class IssueUnit[T <: PolymorphicDataChain](
     val srcRegContent =
       renameInfo.physSrcRegs.map(x => prf.readAsync(x))
 
-    val unifiedIssuePort = Stream(IssuePort(dataType))
+    val unifiedIssuePort = Stream(issueDataType)
     unifiedIssuePort.setBlocked()
     unifiedIssuePort.valid := ready
     unifiedIssuePort.payload.srcRegData := Vec(

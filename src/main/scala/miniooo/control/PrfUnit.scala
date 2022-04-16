@@ -57,7 +57,7 @@ case class PrfStateTableSnapshot(registered: Boolean = false) extends Bundle {
     val (ok, index) = this.table.zipWithIndex
       .drop(1) // do not allocate the zeroth register
       .map(x =>
-        (x._1.allocatable & allowMask(x._2), U(x._2, spec.archRegIndexWidth))
+        (x._1.allocatable & allowMask(x._2), U(x._2, spec.physRegIndexWidth))
       )
       .reduceBalancedTree((a, b) => {
         val ok = Bool()
@@ -77,25 +77,15 @@ case class PrfStateTableSnapshot(registered: Boolean = false) extends Bundle {
     (ok, index)
   }
 
-  def markAsBusy(index: UInt): PrfStateTableSnapshot = {
+  def markAsBusyInPlace(index: UInt) {
     assert(
       this.table(index).allocatable,
       Seq("Register not allocatable: ", index)
     )
-    val snapshot = PrfStateTableSnapshot()
-    snapshot.table := Vec(this.table.zipWithIndex.map(arg => {
-      val (x, i) = arg
-      val v = PhysRegState()
-      when(index === i) {
-        v.busy := True
-        v.dataAvailable := False
-        v.allocatable := False
-      } otherwise {
-        v := x
-      }
-      v
-    }))
-    snapshot
+    val entry = this.table(index)
+    entry.busy := True
+    entry.dataAvailable := False
+    entry.allocatable := False
   }
 }
 

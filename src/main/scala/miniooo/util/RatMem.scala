@@ -12,6 +12,7 @@ case class RatMem[T <: Data](wordType: HardType[T], wordCount: Int)
     new ArrayBuffer[(UInt, T, Bool)]() // (address, input, enable)
   def readAsync(address: UInt): T = {
     val out = wordType()
+    out.setCompositeName(this, postfix = "read_" + readPorts.size)
     readPorts += ((address, out))
     out
   }
@@ -58,5 +59,9 @@ case class RatMem[T <: Data](wordType: HardType[T], wordCount: Int)
         }
       }
     }
+
+    /*for(i <- 0 until readPorts.size) {
+      println("Read port " + i + " name: " + readPorts(i)._2.getName())
+    }*/
   }
 }
