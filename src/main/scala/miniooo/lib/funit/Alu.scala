@@ -23,7 +23,7 @@ case class AluOperation() extends Bundle with PolymorphicDataChain {
 }
 
 case class Alu(staticTag: Data, c: AluConfig) extends FunctionUnit {
-  override def singleCycleBypassable = true
+  override def lowLatency = true
 
   override def generate(
       hardType: HardType[_ <: PolymorphicDataChain]

@@ -39,7 +39,7 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
     unit.io_output.setCompositeName(
       this,
       "function_unit_output_" + i
-    ) >/-> dispatch.io.commit(i)
+    ).pipelined(m2s = !fu.lowLatency, s2m = !fu.lowLatency) >> dispatch.io.commit(i)
     issue.io.issueAvailable(i) := unit.io_available
   }
 

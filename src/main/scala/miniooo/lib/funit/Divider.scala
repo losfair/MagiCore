@@ -14,7 +14,7 @@ case class DividerOperation() extends Bundle with PolymorphicDataChain {
 }
 
 final case class Divider(staticTag: Data) extends FunctionUnit {
-  override def singleCycleBypassable = false
+  override def lowLatency = false
 
   override def generate(
       hardType: HardType[_ <: PolymorphicDataChain]

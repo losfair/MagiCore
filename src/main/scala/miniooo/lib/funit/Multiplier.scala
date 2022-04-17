@@ -10,7 +10,7 @@ case class MultiplierConfig(
 )
 
 case class Multiplier(staticTag: Data, c: MultiplierConfig) extends FunctionUnit {
-  override def singleCycleBypassable = false
+  override def lowLatency = false
 
   override def generate(
       hardType: HardType[_ <: PolymorphicDataChain]

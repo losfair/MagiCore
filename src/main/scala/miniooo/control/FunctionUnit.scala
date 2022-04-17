@@ -5,7 +5,7 @@ import spinal.lib._
 import miniooo.util.PolymorphicDataChain
 
 trait FunctionUnit {
-  def singleCycleBypassable: Boolean = false
+  def lowLatency: Boolean = false
   def staticTag: Data
   def generate(hardType: HardType[_ <: PolymorphicDataChain]): FunctionUnitInstance
 }
