@@ -75,7 +75,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
     val full = ptrEq && risingOccupancy
     val banks =
       (0 until spec.commitWidth).map(_ =>
-        RatMem(HardType(robEntryType), robBankSize)
+        LvtMem(HardType(robEntryType), robBankSize)
       )
     val prfIf = Machine.get[PrfInterface]
 

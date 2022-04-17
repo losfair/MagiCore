@@ -92,7 +92,7 @@ case class PrfStateTableSnapshot(registered: Boolean = false) extends Bundle {
 case class PrfUnit() extends Area {
   val listeners = new ArrayBuffer[(UInt, Bool)]() // (index, wakeUp)
   val notifiers = new ArrayBuffer[(Bool, UInt)]() // (enable, index)
-  val content = RatMem(PrfItem(), Machine.get[MachineSpec].numPhysicalRegs)
+  val content = LvtMem(PrfItem(), Machine.get[MachineSpec].numPhysicalRegs)
   val state =
     PrfStateTableSnapshot(registered = true)
 

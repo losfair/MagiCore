@@ -4,8 +4,8 @@ import spinal.core._
 import spinal.lib._
 import scala.collection.mutable.ArrayBuffer
 
-// Async mem with Register Allocation Table.
-case class RatMem[T <: Data](wordType: HardType[T], wordCount: Int)
+// Async mem with Live Value Table.
+case class LvtMem[T <: Data](wordType: HardType[T], wordCount: Int)
     extends Area {
   val readPorts = new ArrayBuffer[(UInt, T)]() // (address, output)
   val writePorts =
