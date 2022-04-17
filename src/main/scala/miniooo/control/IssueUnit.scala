@@ -232,7 +232,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
         val prio = UInt(l._1.getWidth bits)
         val index = indexType
         when(l._3 && r._3) {
-          when(l._1 <= r._1) {
+          when(l._1 >= r._1) {
             prio := l._1
             index := l._2
           } otherwise {
