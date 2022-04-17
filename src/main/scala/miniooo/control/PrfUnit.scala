@@ -173,7 +173,7 @@ case class PrfInterface(unit: PrfUnit) {
         Seq("prf state matrix:") ++ state.table.zipWithIndex.flatMap({ case (x, i) =>
           Seq("\\n\\t", i.toString(), ": ") ++ x.reportSeq()
         })
-      report(s)
+      Machine.report(s)
     }*/
   }
 }

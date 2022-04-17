@@ -356,16 +356,16 @@ case class IssueUnit[T <: PolymorphicDataChain](
       assert(issueCount === 1)
     }
 
-    /*when(unifiedIssuePort.fire) {
-      report(Seq("issued - mask ", issueOk.asBits, " iq index ", index))
+    when(unifiedIssuePort.fire) {
+      Machine.report(Seq("issued - mask ", issueOk.asBits, " iq index ", index))
       try {
         val dispatchInfo = iqContent.data.lookup[DispatchInfo]
-        report(Seq("issued rob index is ", dispatchInfo.robIndex))
+        Machine.report(Seq("issued rob index is ", dispatchInfo.robIndex))
       } catch {
         case _: Exception => {}
       }
-      report(iq.report())
-    }*/
+      Machine.report(iq.report())
+    }
 
     io.issueMonitor << unifiedIssuePort.asFlow.throwWhen(
       !unifiedIssuePort.ready

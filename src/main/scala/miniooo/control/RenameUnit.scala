@@ -155,20 +155,20 @@ case class RenameUnit[T <: PolymorphicDataChain](dataType: HardType[T])
         incRefcount(phys) := True
       }
     }
-    /*report(
+    Machine.report(
       Seq("renamed src: ") ++ decodeInfo.archSrcRegs
         .zip(output.physSrcRegs)
         .flatMap({ case (arch, phys) =>
           Seq("[v=", arch.valid, ",arch=", arch.index, ",phys=", phys, "]")
         })
     )
-    report(
+    Machine.report(
       Seq("renamed dst: ") ++ decodeInfo.archDstRegs
         .zip(output.physDstRegs)
         .flatMap({ case (arch, phys) =>
           Seq("[v=", arch.valid, ",arch=", arch.index, ",phys=", phys, "]")
         })
-    )*/
+    )
   }
 }
 

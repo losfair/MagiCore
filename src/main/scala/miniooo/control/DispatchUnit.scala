@@ -50,6 +50,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
     val input = Stream(dataType())
     val output = Stream(outType)
     val commit = Vec(Stream(commitRequestType), sem.numFunctionUnits)
+    val writebackMonitor = Vec(Flow(CommitRequest(dataType)), spec.commitWidth)
   }
 
   val rob = new Area {
@@ -183,8 +184,8 @@ case class DispatchUnit[T <: PolymorphicDataChain](
         }
       }
 
-      /*when(selectedEntryValid) {
-        report(
+      when(selectedEntryValid) {
+        Machine.report(
           Seq(
             "commit rob entry cyc=",
             debugCyc,
@@ -210,7 +211,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
               )
             })
         )
-      }*/
+      }
     }
 
     val popLogic = new Area {
@@ -268,12 +269,15 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           }
         }
 
+        io.writebackMonitor(i).valid := entryReady
+        io.writebackMonitor(i).payload := entryData.data.commitRequest
+
         // Pop the item from the queue
         when(entryReady) {
           risingOccupancy := False
           popPtr := entryData.addr + 1
 
-          /*report(
+          Machine.report(
             Seq(
               "writeback rob entry cyc=",
               debugCyc,
@@ -298,7 +302,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
                   "]"
                 )
               })
-          )*/
+          )
         }
       }
     }

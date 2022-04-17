@@ -42,12 +42,13 @@ class TestBackendPipeline extends AnyFunSuite {
   val msem = new MachineSemantics {
     def functionUnits: Seq[FunctionUnit] = Seq(
       new Alu(TestTag.static(0), AluConfig(alu32 = false)),
-      new Multiplier(TestTag.static(1), MultiplierConfig())
+      new Multiplier(TestTag.static(1), MultiplierConfig()),
+      new Divider(TestTag.static(2))
     )
   }
 
   object GenericOpcode extends SpinalEnum(binarySequential) {
-    val ADD, SUB, AND, OR, XOR, MOV = newElement()
+    val ADD, SUB, AND, OR, XOR, MOV, DIV_S, DIV_U, REM_S, REM_U = newElement()
 
     def translateToAlu(
         that: SpinalEnumCraft[GenericOpcode.type]
@@ -62,6 +63,7 @@ class TestBackendPipeline extends AnyFunSuite {
         is(OR) { out := AluOpcode.OR }
         is(XOR) { out := AluOpcode.XOR }
         is(MOV) { out := AluOpcode.MOV }
+        default { ok := False }
       }
       (ok, out)
     }
@@ -81,6 +83,11 @@ class TestBackendPipeline extends AnyFunSuite {
         op.const := const.asBits
         op.opcode := GenericOpcode.translateToAlu(opc)._2
         op.useConst := useConst
+        Some(op.asInstanceOf[T])
+      } else if (ctag == classTag[DividerOperation]) {
+        val op = DividerOperation()
+        op.signed := opc === GenericOpcode.DIV_S || opc === GenericOpcode.REM_S
+        op.useRemainder := opc === GenericOpcode.REM_S || opc === GenericOpcode.REM_U
         Some(op.asInstanceOf[T])
       } else {
         None
@@ -112,6 +119,7 @@ class TestBackendPipeline extends AnyFunSuite {
   }
 
   class TestBackendPipelineTop extends Component {
+    // Machine.provide(MachineDebugMarker)
     Machine.provide(mspec)
     Machine.provide(msem)
     val pipeline = BackendPipeline(MockPayload())
@@ -120,10 +128,25 @@ class TestBackendPipeline extends AnyFunSuite {
 
       val regReadAddr = in(Machine.get[MachineSpec].archRegIndexType)
       val regReadData = out(Machine.get[MachineSpec].dataType)
+      val writebackMonitor = out(
+        Vec(
+          pipeline.io.writebackMonitor.dataType(),
+          pipeline.io.writebackMonitor.size
+        )
+      )
+      val cycles = out(UInt(64 bits))
     }
     io.input >> pipeline.io.input
     val prfIf = Machine.get[PrfInterface]
     io.regReadData := prfIf.readAsync(pipeline.rename.cmt(io.regReadAddr)).data
+    pipeline.io.writebackMonitor
+      .zip(io.writebackMonitor)
+      .foreach(x => x._1 >> x._2)
+
+    val cycles = Reg(UInt(64 bits)) init (0)
+    cycles := cycles + 1
+
+    io.cycles := cycles
   }
 
   test("TestBackendPipeline") {
@@ -154,17 +177,42 @@ class TestBackendPipeline extends AnyFunSuite {
         )
       }
 
+      dut.clockDomain.waitSampling(100) // wait for preparation
+
       val mirror =
         (0 until mspec.numArchitecturalRegs).map(_ => BigInt(0)).to[ArrayBuffer]
 
-      for (i <- 0 until 1000) {
-        val op = Random.nextInt(3)
+      val caseCount: mutable.Map[String, Int] = mutable.Map()
+      caseCount.update("LD_CONST", 0)
+      caseCount.update("ADD", 0)
+      caseCount.update("MUL", 0)
+      caseCount.update("DIV_U", 0)
+
+      val testSize = 5000
+      var writebackCount = 0
+
+      fork {
+        while (true) {
+          dut.clockDomain.waitSampling()
+          for (ch <- dut.io.writebackMonitor) {
+            if (ch.valid.toBoolean) {
+              writebackCount += 1
+            }
+          }
+        }
+      }
+
+      val startCycles = dut.io.cycles.toBigInt
+
+      for (i <- 0 until testSize) {
+        val op = Random.nextInt(100)
         op match {
-          case 0 =>
+          case x if 0 until 10 contains x =>
             // LD_CONST
+            caseCount.update("LD_CONST", caseCount("LD_CONST") + 1)
             val dst = Random.nextInt(mspec.numArchitecturalRegs)
             val value = Random.nextInt(100000)
-            //println("ld_const " + value + " -> r" + dst)
+            // println("ld_const " + value + " -> r" + dst)
             mirror.update(dst, value)
             dut.io.input.simWrite(
               dut,
@@ -180,12 +228,13 @@ class TestBackendPipeline extends AnyFunSuite {
                 )
               }
             )
-          case 1 =>
+          case x if 10 until 80 contains x =>
             // ADD
+            caseCount.update("ADD", caseCount("ADD") + 1)
             val left = Random.nextInt(mspec.numArchitecturalRegs)
             val right = Random.nextInt(mspec.numArchitecturalRegs)
             val dst = Random.nextInt(mspec.numArchitecturalRegs)
-            //println("add r" + left + " r" + right + " -> r" + dst)
+            // println("add r" + left + " r" + right + " -> r" + dst)
             mirror.update(dst, (mirror(left) + mirror(right)) & 0xffffffffL)
             dut.io.input.simWrite(
               dut,
@@ -200,12 +249,13 @@ class TestBackendPipeline extends AnyFunSuite {
                 )
               }
             )
-          case 2 =>
+          case x if 80 until 98 contains x =>
             // MUL
+            caseCount.update("MUL", caseCount("MUL") + 1)
             val left = Random.nextInt(mspec.numArchitecturalRegs)
             val right = Random.nextInt(mspec.numArchitecturalRegs)
             val dst = Random.nextInt(mspec.numArchitecturalRegs)
-            //println("mul r" + left + " r" + right + " -> r" + dst)
+            // println("mul r" + left + " r" + right + " -> r" + dst)
             mirror.update(dst, (mirror(left) * mirror(right)) & 0xffffffffL)
             dut.io.input.simWrite(
               dut,
@@ -220,10 +270,49 @@ class TestBackendPipeline extends AnyFunSuite {
                 )
               }
             )
+          case x if 98 until 100 contains x => {
+            // DIV_U
+            caseCount.update("DIV_U", caseCount("DIV_U") + 1)
+            val left = Random.nextInt(mspec.numArchitecturalRegs)
+            val right = Random.nextInt(mspec.numArchitecturalRegs)
+            val dst = Random.nextInt(mspec.numArchitecturalRegs)
+            if (mirror(right) == 0) {
+              mirror.update(dst, 0xffffffffL)
+            } else {
+              mirror.update(dst, mirror(left) / mirror(right))
+            }
+            dut.io.input.simWrite(
+              dut,
+              p => {
+                MockPayload.create(
+                  p,
+                  t = 2,
+                  rs1 = Some(left),
+                  rs2 = Some(right),
+                  rd = Some(dst),
+                  opc = GenericOpcode.DIV_U
+                )
+              }
+            )
+          }
         }
       }
 
-      dut.clockDomain.waitSampling(10000)
+      while (writebackCount < testSize) {
+        dut.clockDomain.waitSampling()
+      }
+
+      val endCycles = dut.io.cycles.toBigInt
+      println(
+        "Finished " + testSize + " instructions in " + (endCycles - startCycles) + " cycles. IPC=" + (testSize.toDouble / (endCycles - startCycles).toDouble)
+      )
+
+      dut.clockDomain.waitSampling(100)
+      assert(writebackCount == testSize)
+
+      for ((k, v) <- caseCount) {
+        println(k + ": " + v)
+      }
 
       for (i <- 0 until mspec.numArchitecturalRegs) {
         dut.io.regReadAddr #= i

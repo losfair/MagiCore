@@ -48,6 +48,17 @@ object Machine {
       Machine._current.set(null)
     }
   }
+
+  def report(data: Seq[Any]) {
+    try {
+      get[MachineDebugMarker.type]
+    } catch {
+      case _: Exception => {
+        return
+      }
+    }
+    spinal.core.report(data)
+  }
 }
 
 class Machine {
@@ -61,3 +72,5 @@ class Machine {
   }
 
 }
+
+object MachineDebugMarker {}

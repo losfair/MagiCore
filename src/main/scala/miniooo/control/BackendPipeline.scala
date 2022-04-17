@@ -45,7 +45,10 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
 
   val io = new Bundle {
     val input = Stream(inputType)
+
+    val writebackMonitor = Vec(Flow(CommitRequest(dispatch.dataType)), spec.commitWidth)
   }
 
   io.input >> rename.io.input
+  dispatch.io.writebackMonitor.zip(io.writebackMonitor).foreach(x => x._1 >> x._2)
 }
