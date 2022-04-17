@@ -45,6 +45,7 @@ case class IssueSpec(
 )
 
 case class IssueQueue[T <: PolymorphicDataChain](
+    c: IssueConfig,
     dataType: HardType[T]
 ) extends Area {
   private val spec = Machine.get[MachineSpec]
@@ -72,6 +73,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
     val valid = Bool()
     val priority = UInt(log2Up(spec.issueQueueSize) bits)
     val dependencies = Vec(IqDependency(), spec.maxNumSrcRegsPerInsn)
+    val portIndex = UInt(log2Up(c.portSpecs.size) bits)
 
     def canIssue = valid && dependencies.map(x => !x.valid || x.wakeUp).andR
   }
@@ -80,6 +82,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
     def idle: IqTag = {
       val tag = IqTag()
       tag.valid := False
+      tag.portIndex.assignDontCare()
       tag.priority.assignDontCare()
       for (i <- 0 until spec.maxNumSrcRegsPerInsn) {
         tag.dependencies(i) := IqDependency.idle
@@ -91,6 +94,8 @@ case class IssueQueue[T <: PolymorphicDataChain](
   case class IqData() extends Bundle {
     val data = dataType()
   }
+
+  println("IqTag width: " + IqTag().getBitsWidth)
 
   val iqTagSpace = Vec(Reg(IqTag()) init (IqTag.idle), spec.issueQueueSize)
   val physRegBusyMask: Vec[Bool] = Vec(
@@ -156,6 +161,14 @@ case class IssueQueue[T <: PolymorphicDataChain](
         })
     )
 
+    val (portIndexOk, portIndex) = (0 until c.portSpecs.size).firstWhere(
+      hardType = UInt(log2Up(c.portSpecs.size) bits),
+      predicate = i => c.portSpecs(i).staticTag === decodeInfo.functionUnitTag,
+      generate = x => U(x, log2Up(c.portSpecs.size) bits)
+    )
+    assert(!enable || portIndexOk)
+    t.portIndex := portIndex
+
     val iqFreeMask = SetFromFirstOne(Vec(iqTagSpace.map(!_.valid)))
     val notFull = iqFreeMask.orR
 
@@ -207,9 +220,11 @@ case class IssueQueue[T <: PolymorphicDataChain](
     })
   }
 
-  def queryPop(): (Bool, UInt) = {
+  def queryPop(issueAvailable: Vec[Bool]): (Bool, UInt) = {
     val (_, index, ok) = iqTagSpace.zipWithIndex
-      .map({ case (x, i) => (x.priority, U(i, indexSize), x.canIssue) })
+      .map({ case (x, i) =>
+        (x.priority, U(i, indexSize), x.canIssue && issueAvailable(x.portIndex))
+      })
       .reduceBalancedTree((l, r) => {
         val prio = UInt(l._1.getWidth bits)
         val index = indexType
@@ -257,11 +272,13 @@ case class IssueUnit[T <: PolymorphicDataChain](
   val io = new Bundle {
     val input = Stream(dataType())
     val issuePorts = Vec(Stream(issueDataType), c.portSpecs.size)
+    val issueAvailable = Vec(Bool(), c.portSpecs.size)
     val issueMonitor = Flow(issueDataType)
   }
 
-  val iq = IssueQueue(dataType)
+  val iq = IssueQueue(c = c, dataType = dataType)
   val iqDataSpace = Mem(IqData(), spec.issueQueueSize)
+  println("IqData width: " + IqData().getBitsWidth)
 
   val issuePushLogic = new Area {
     val newIqData = IqData()
@@ -279,7 +296,7 @@ case class IssueUnit[T <: PolymorphicDataChain](
 
   val issuePopLogic = new Area {
     val commit = Bool()
-    val (nextReady, nextIndex) = iq.queryPop()
+    val (nextReady, nextIndex) = iq.queryPop(io.issueAvailable)
     val keep = Reg(Bool()) init (false) setWhen (nextReady) clearWhen (commit)
     val rReady = Reg(Bool())
     val rIndex = Reg(iq.indexType)
@@ -350,6 +367,8 @@ case class IssueUnit[T <: PolymorphicDataChain](
       report(iq.report())
     }*/
 
-    io.issueMonitor << unifiedIssuePort.asFlow.throwWhen(!unifiedIssuePort.ready)
+    io.issueMonitor << unifiedIssuePort.asFlow.throwWhen(
+      !unifiedIssuePort.ready
+    )
   }
 }

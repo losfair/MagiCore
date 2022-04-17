@@ -18,6 +18,7 @@ case class Multiplier(staticTag: Data, c: MultiplierConfig) extends FunctionUnit
     new FunctionUnitInstance {
       private val spec = Machine.get[MachineSpec]
 
+      val io_available = True
       val io_input = Stream(hardType())
       val io_output = Stream(CommitRequest(null))
 

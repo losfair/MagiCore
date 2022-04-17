@@ -11,6 +11,7 @@ trait FunctionUnit {
 }
 
 trait FunctionUnitInstance extends Area {
+  def io_available: Bool
   def io_input: Stream[_ <: PolymorphicDataChain]
   def io_output: Stream[CommitRequest]
 }

@@ -29,6 +29,7 @@ case class Alu(staticTag: Data, c: AluConfig) extends FunctionUnit {
       hardType: HardType[_ <: PolymorphicDataChain]
   ): FunctionUnitInstance = {
     new FunctionUnitInstance {
+      val io_available = True
       val io_input = Stream(hardType())
       val io_output = Stream(CommitRequest(null))
 

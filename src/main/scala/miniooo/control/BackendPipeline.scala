@@ -40,6 +40,7 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
       this,
       "function_unit_output_" + i
     ) >/-> dispatch.io.commit(i)
+    issue.io.issueAvailable(i) := unit.io_available
   }
 
   val io = new Bundle {
