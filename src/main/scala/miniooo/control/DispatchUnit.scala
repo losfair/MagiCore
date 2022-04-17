@@ -53,6 +53,10 @@ case class DispatchUnit[T <: PolymorphicDataChain](
   }
 
   val rob = new Area {
+
+    val debugCyc = Reg(UInt(64 bits)) init (0)
+    debugCyc := debugCyc + 1
+
     def getBankIndexForPtr(p: UInt) = p(
       log2Up(spec.commitWidth) - 1 downto 0
     )
@@ -178,6 +182,35 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           st.dataAvailable := True
         }
       }
+
+      /*when(selectedEntryValid) {
+        report(
+          Seq(
+            "commit rob entry cyc=",
+            debugCyc,
+            " at ",
+            commit.payload.robAddr
+          ) ++ renameInfo.physDstRegs
+            .zip(
+              decodeInfo.archDstRegs
+            )
+            .zip(commit.payload.regWriteValue)
+            .flatMap(arg => {
+              val ((phys, arch), value) = arg
+              Seq(
+                "[v=",
+                arch.valid,
+                ",phys=",
+                phys,
+                ",arch=",
+                arch.index,
+                ",value=",
+                value,
+                "]"
+              )
+            })
+        )
+      }*/
     }
 
     val popLogic = new Area {
@@ -204,8 +237,6 @@ case class DispatchUnit[T <: PolymorphicDataChain](
       // Continuous ready entries
       var entryReady = True
       val renameIf = Machine.get[RenameInterface]
-      val debugCyc = Reg(UInt(64 bits)) init (0)
-      debugCyc := debugCyc + 1
 
       for (i <- 0 until spec.commitWidth) {
         val entryData = readOutput(i)
@@ -242,9 +273,9 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           risingOccupancy := False
           popPtr := entryData.addr + 1
 
-          report(
+          /*report(
             Seq(
-              "committed rob entry cyc=",
+              "writeback rob entry cyc=",
               debugCyc,
               " at ",
               entryData.addr
@@ -267,7 +298,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
                   "]"
                 )
               })
-          )
+          )*/
         }
       }
     }

@@ -19,6 +19,25 @@ case class IssuePort[T <: Data](hardType: HardType[T])
     Machine.get[MachineSpec].dataType,
     Machine.get[MachineSpec].maxNumSrcRegsPerInsn
   )
+
+  def toPhysSrcRegActivationMask(): Vec[Bool] = {
+    val spec = Machine.get[MachineSpec]
+    val renameInfo = this.lookup[RenameInfo]
+    val decodeInfo = this.lookup[DecodeInfo]
+
+    Vec(
+      (0 until spec.numPhysicalRegs).map(i =>
+        decodeInfo.archSrcRegs
+          .zip(renameInfo.physSrcRegs)
+          .map({
+            case (arch, phys) => {
+              arch.valid && phys === i
+            }
+          })
+          .orR
+      )
+    )
+  }
 }
 
 case class IssueSpec(
@@ -74,6 +93,17 @@ case class IssueQueue[T <: PolymorphicDataChain](
   }
 
   val iqTagSpace = Vec(Reg(IqTag()) init (IqTag.idle), spec.issueQueueSize)
+  val physRegBusyMask: Vec[Bool] = Vec(
+    (0 until spec.numPhysicalRegs).map(i =>
+      iqTagSpace
+        .map(x =>
+          x.valid && x.dependencies
+            .map(y => y.valid && y.physRegIndex === i)
+            .orR
+        )
+        .orR
+    )
+  )
 
   // Wakeup logic
   for (t <- iqTagSpace) {
@@ -227,6 +257,7 @@ case class IssueUnit[T <: PolymorphicDataChain](
   val io = new Bundle {
     val input = Stream(dataType())
     val issuePorts = Vec(Stream(issueDataType), c.portSpecs.size)
+    val issueMonitor = Flow(issueDataType)
   }
 
   val iq = IssueQueue(dataType)
@@ -310,7 +341,15 @@ case class IssueUnit[T <: PolymorphicDataChain](
 
     /*when(unifiedIssuePort.fire) {
       report(Seq("issued - mask ", issueOk.asBits, " iq index ", index))
+      try {
+        val dispatchInfo = iqContent.data.lookup[DispatchInfo]
+        report(Seq("issued rob index is ", dispatchInfo.robIndex))
+      } catch {
+        case _: Exception => {}
+      }
       report(iq.report())
     }*/
+
+    io.issueMonitor << unifiedIssuePort.asFlow.throwWhen(!unifiedIssuePort.ready)
   }
 }

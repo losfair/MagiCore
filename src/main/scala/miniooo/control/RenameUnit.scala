@@ -13,7 +13,7 @@ case class RenameInfo(inner: HardType[_ <: PolymorphicDataChain])
     Vec(spec.physRegIndexType, spec.maxNumSrcRegsPerInsn)
   val physDstRegs =
     Vec(spec.physRegIndexType, spec.maxNumDstRegsPerInsn)
-  val parentObjects = if(inner != null) Seq(inner()) else Seq()
+  val parentObjects = if (inner != null) Seq(inner()) else Seq()
 }
 
 case class RenameUnit[T <: PolymorphicDataChain](dataType: HardType[T])
@@ -28,6 +28,7 @@ case class RenameUnit[T <: PolymorphicDataChain](dataType: HardType[T])
   val io = new Bundle {
     val input = Stream(dataType())
     val output = Stream(outType)
+    val physSrcRegActivationMask = Flow(Vec(Bool(), spec.numPhysicalRegs))
   }
 
   // Rename Map Table
@@ -62,6 +63,35 @@ case class RenameUnit[T <: PolymorphicDataChain](dataType: HardType[T])
     }
   }
 
+  // SRC refcount
+  val srcRefcountWidth = 3 bits
+  def srcRefcountType = UInt(srcRefcountWidth)
+  val srcRefcount = Vec(
+    (0 until spec.numPhysicalRegs).map(_ => Reg(srcRefcountType) init (0))
+  )
+  val zeroRefcountMask = Vec(srcRefcount.map(x => x === 0))
+
+  val incRefcount = Vec(Bool(), spec.numPhysicalRegs)
+  for (b <- incRefcount) b := False
+
+  val decRefcount = Vec(Bool(), spec.numPhysicalRegs)
+  for (b <- decRefcount) b := False
+
+  when(io.physSrcRegActivationMask.valid) {
+    decRefcount := io.physSrcRegActivationMask.payload
+  }
+
+  for (i <- 0 until spec.numPhysicalRegs) {
+    when(incRefcount(i) && !decRefcount(i)) {
+      assert(srcRefcount(i) =/= srcRefcountType.maxValue, "Refcount overflow")
+      srcRefcount(i) := srcRefcount(i) + 1
+    }
+    when(decRefcount(i) && !incRefcount(i)) {
+      assert(srcRefcount(i) =/= 0, "Refcount underflow")
+      srcRefcount(i) := srcRefcount(i) - 1
+    }
+  }
+
   val prfIf = Machine.get[PrfInterface]
   val decodeInfo = io.input.payload.lookup[DecodeInfo]
 
@@ -77,7 +107,9 @@ case class RenameUnit[T <: PolymorphicDataChain](dataType: HardType[T])
     var localAllowMask = rmtAllowMask
     output.physDstRegs := Vec(
       decodeInfo.archDstRegs.map(entry => {
-        val (thisAllocOk, index) = prfIf.state.findFreeReg(localAllowMask)
+        val (thisAllocOk, index) = prfIf.state.findFreeReg(
+          Vec(localAllowMask.zip(zeroRefcountMask).map(x => x._1 && x._2))
+        )
         allocOk = entry.valid.mux(
           True -> (allocOk && thisAllocOk),
           False -> allocOk
@@ -92,7 +124,16 @@ case class RenameUnit[T <: PolymorphicDataChain](dataType: HardType[T])
     )
   })
 
-  io.output << io.input.translateWith(output).continueWhen(allocOk)
+  val refcountIncOk = decodeInfo.archSrcRegs
+    .zip(output.physSrcRegs)
+    .map { case (arch, phys) =>
+      !arch.valid || srcRefcount(phys) =/= srcRefcountType.maxValue
+    }
+    .andR
+
+  io.output << io.input
+    .translateWith(output)
+    .continueWhen(allocOk && refcountIncOk)
 
   // Speculatively write RMT update
   when(io.output.fire) {
@@ -106,6 +147,28 @@ case class RenameUnit[T <: PolymorphicDataChain](dataType: HardType[T])
         rmtAllowMask.write(phys, False)
       }
     }
+    for (
+      (arch, phys) <- decodeInfo.archSrcRegs
+        .zip(output.physSrcRegs)
+    ) {
+      when(arch.valid) {
+        incRefcount(phys) := True
+      }
+    }
+    /*report(
+      Seq("renamed src: ") ++ decodeInfo.archSrcRegs
+        .zip(output.physSrcRegs)
+        .flatMap({ case (arch, phys) =>
+          Seq("[v=", arch.valid, ",arch=", arch.index, ",phys=", phys, "]")
+        })
+    )
+    report(
+      Seq("renamed dst: ") ++ decodeInfo.archDstRegs
+        .zip(output.physDstRegs)
+        .flatMap({ case (arch, phys) =>
+          Seq("[v=", arch.valid, ",arch=", arch.index, ",phys=", phys, "]")
+        })
+    )*/
   }
 }
 

@@ -26,13 +26,20 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
 
   rename.io.output >/-> dispatch.io.input
   dispatch.io.output >/-> issue.io.input
+  issue.io.issueMonitor.translateWith(
+    issue.io.issueMonitor.payload.toPhysSrcRegActivationMask()
+  ) >> rename.io.physSrcRegActivationMask
   for ((fu, i) <- sem.functionUnits.zipWithIndex) {
     val unit = fu.generate(HardType(issue.issueDataType))
     issue.io
       .issuePorts(i)
-      .asInstanceOf[Stream[PolymorphicDataChain]] >> unit.io_input.setCompositeName(this, "function_unit_input_" + i)
+      .asInstanceOf[Stream[PolymorphicDataChain]] >> unit.io_input
+      .setCompositeName(this, "function_unit_input_" + i)
       .asInstanceOf[Stream[PolymorphicDataChain]]
-    unit.io_output.setCompositeName(this, "function_unit_output_" + i) >/-> dispatch.io.commit(i)
+    unit.io_output.setCompositeName(
+      this,
+      "function_unit_output_" + i
+    ) >/-> dispatch.io.commit(i)
   }
 
   val io = new Bundle {

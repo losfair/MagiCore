@@ -10,7 +10,7 @@ case class AluConfig(
 )
 
 object AluOpcode extends SpinalEnum(binarySequential) {
-  val ADD, SUB, AND, OR, XOR = newElement()
+  val ADD, SUB, AND, OR, XOR, MOV = newElement()
 }
 
 case class AluOperation() extends Bundle with PolymorphicDataChain {
@@ -60,6 +60,9 @@ case class Alu(staticTag: Data, c: AluConfig) extends FunctionUnit {
         }
         is(AluOpcode.XOR) {
           outValue := a ^ b
+        }
+        is(AluOpcode.MOV) {
+          outValue := b
         }
       }
 

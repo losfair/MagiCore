@@ -47,7 +47,7 @@ class TestBackendPipeline extends AnyFunSuite {
   }
 
   object GenericOpcode extends SpinalEnum(binarySequential) {
-    val ADD, SUB, AND, OR, XOR = newElement()
+    val ADD, SUB, AND, OR, XOR, MOV = newElement()
 
     def translateToAlu(
         that: SpinalEnumCraft[GenericOpcode.type]
@@ -61,6 +61,7 @@ class TestBackendPipeline extends AnyFunSuite {
         is(AND) { out := AluOpcode.AND }
         is(OR) { out := AluOpcode.OR }
         is(XOR) { out := AluOpcode.XOR }
+        is(MOV) { out := AluOpcode.MOV }
       }
       (ok, out)
     }
@@ -127,7 +128,8 @@ class TestBackendPipeline extends AnyFunSuite {
 
   test("TestBackendPipeline") {
     SimConfig.withWave.doSim(
-      rtl = Machine.build { new TestBackendPipelineTop() }
+      rtl = Machine.build { new TestBackendPipelineTop() },
+      name = "test"
     ) { dut =>
       dut.io.input.valid #= false
 
@@ -135,43 +137,100 @@ class TestBackendPipeline extends AnyFunSuite {
       waitUntil(dut.clockDomain.isResetAsserted)
       waitUntil(dut.clockDomain.isResetDeasserted)
 
-      dut.io.input.simWrite(dut, p => {
-        MockPayload.create(p, t = 0, rs1 = Some(0), rs2 = Some(0), rd = Some(0), opc = GenericOpcode.XOR) // zero out r0
-      })
+      // Zero out registers
+      for (i <- 0 until mspec.numArchitecturalRegs) {
+        dut.io.input.simWrite(
+          dut,
+          p => {
+            MockPayload.create(
+              p,
+              t = 0,
+              rs1 = Some(i),
+              rs2 = Some(i),
+              rd = Some(i),
+              opc = GenericOpcode.XOR
+            )
+          }
+        )
+      }
 
-      dut.io.input.simWrite(dut, p => {
-        MockPayload.create(p, t = 0, rs1 = Some(1), rs2 = Some(1), rd = Some(1), opc = GenericOpcode.XOR) // zero out r1
-      })
+      val mirror =
+        (0 until mspec.numArchitecturalRegs).map(_ => BigInt(0)).to[ArrayBuffer]
 
-      dut.io.input.simWrite(dut, p => {
-        MockPayload.create(p, t = 0, rs1 = Some(2), rs2 = Some(2), rd = Some(2), opc = GenericOpcode.XOR) // zero out r2
-      })
+      for (i <- 0 until 1000) {
+        val op = Random.nextInt(3)
+        op match {
+          case 0 =>
+            // LD_CONST
+            val dst = Random.nextInt(mspec.numArchitecturalRegs)
+            val value = Random.nextInt(100000)
+            //println("ld_const " + value + " -> r" + dst)
+            mirror.update(dst, value)
+            dut.io.input.simWrite(
+              dut,
+              p => {
+                MockPayload.create(
+                  p,
+                  t = 0,
+                  rs1 = None,
+                  rs2 = None,
+                  const = Some(value),
+                  rd = Some(dst),
+                  opc = GenericOpcode.MOV
+                )
+              }
+            )
+          case 1 =>
+            // ADD
+            val left = Random.nextInt(mspec.numArchitecturalRegs)
+            val right = Random.nextInt(mspec.numArchitecturalRegs)
+            val dst = Random.nextInt(mspec.numArchitecturalRegs)
+            //println("add r" + left + " r" + right + " -> r" + dst)
+            mirror.update(dst, (mirror(left) + mirror(right)) & 0xffffffffL)
+            dut.io.input.simWrite(
+              dut,
+              p => {
+                MockPayload.create(
+                  p,
+                  t = 0,
+                  rs1 = Some(left),
+                  rs2 = Some(right),
+                  rd = Some(dst),
+                  opc = GenericOpcode.ADD
+                )
+              }
+            )
+          case 2 =>
+            // MUL
+            val left = Random.nextInt(mspec.numArchitecturalRegs)
+            val right = Random.nextInt(mspec.numArchitecturalRegs)
+            val dst = Random.nextInt(mspec.numArchitecturalRegs)
+            //println("mul r" + left + " r" + right + " -> r" + dst)
+            mirror.update(dst, (mirror(left) * mirror(right)) & 0xffffffffL)
+            dut.io.input.simWrite(
+              dut,
+              p => {
+                MockPayload.create(
+                  p,
+                  t = 1,
+                  rs1 = Some(left),
+                  rs2 = Some(right),
+                  rd = Some(dst),
+                  opc = GenericOpcode.ADD
+                )
+              }
+            )
+        }
+      }
 
-      dut.io.input.simWrite(dut, p => {
-        MockPayload.create(p, t = 0, rs1 = Some(1), rs2 = None, rd = Some(1), opc = GenericOpcode.ADD, const = Some(11)) // r1 = 11
-      })
+      dut.clockDomain.waitSampling(10000)
 
-      dut.io.input.simWrite(dut, p => {
-        MockPayload.create(p, t = 0, rs1 = Some(2), rs2 = None, rd = Some(2), opc = GenericOpcode.ADD, const = Some(42)) // r2 = 42
-      })
-
-      dut.io.input.simWrite(dut, p => {
-        MockPayload.create(p, t = 1, rs1 = Some(1), rs2 = Some(2), rd = Some(4), opc = GenericOpcode.ADD) // r4 = r1 * r2
-      })
-
-      dut.io.input.simWrite(dut, p => {
-        MockPayload.create(p, t = 0, rs1 = Some(1), rs2 = Some(2), rd = Some(3), opc = GenericOpcode.ADD) // r3 = r1 + r2
-      })
-
-      dut.io.input.simWrite(dut, p => {
-        MockPayload.create(p, t = 0, rs1 = Some(4), rs2 = Some(3), rd = Some(5), opc = GenericOpcode.ADD) // r5 = r4 + r3
-      })
-
-      dut.clockDomain.waitSampling(1000)
-
-      dut.io.regReadAddr #= 5
-      dut.clockDomain.waitSampling()
-      assert(dut.io.regReadData.toBigInt == 42 * 11 + 42 + 11)
+      for (i <- 0 until mspec.numArchitecturalRegs) {
+        dut.io.regReadAddr #= i
+        dut.clockDomain.waitSampling()
+        val data = dut.io.regReadData.toBigInt
+        assert(data == mirror(i), "value validation failed for reg " + i)
+      }
       println("validation ok")
     }
   }
