@@ -238,6 +238,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
       // Continuous ready entries
       var entryReady = True
       val renameIf = Machine.get[RenameInterface]
+      var cmtSnapshot = renameIf.unit.cmt
 
       for (i <- 0 until spec.commitWidth) {
         val entryData = readOutput(i)
@@ -247,6 +248,12 @@ case class DispatchUnit[T <: PolymorphicDataChain](
 
         val renameInfo = entryData.data.commitRequest.lookup[RenameInfo]
         val decodeInfo = entryData.data.commitRequest.lookup[DecodeInfo]
+
+        cmtSnapshot = Vec(cmtSnapshot.map(x => {
+          val v = spec.physRegIndexType
+          v := x
+          v
+        }))
 
         for (
           (dstRegPhys, dstRegArch) <- renameInfo.physDstRegs
@@ -262,9 +269,9 @@ case class DispatchUnit[T <: PolymorphicDataChain](
             assert(!st.allocatable)
 
             st.allocatable := True
-            renameIf.unit.cmt.write(dstRegArch.index, dstRegPhys)
+            cmtSnapshot.write(dstRegArch.index, dstRegPhys)
             renameIf.unit.cmtAllowMask
-              .write(renameIf.unit.cmt(dstRegArch.index), True)
+              .write(cmtSnapshot(dstRegArch.index), True)
             renameIf.unit.cmtAllowMask.write(dstRegPhys, False)
           }
         }
@@ -305,6 +312,8 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           )
         }
       }
+
+      renameIf.unit.cmt := cmtSnapshot
     }
   }
 }

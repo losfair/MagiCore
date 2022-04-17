@@ -41,7 +41,7 @@ case class RenameUnit[T <: PolymorphicDataChain](dataType: HardType[T])
 
   // Check RMT invariants
   for (i <- 0 until spec.numArchitecturalRegs) {
-    assert(rmt(i) === 0 || rmtAllowMask(rmt(i)) === False)
+    assert(rmt(i) === 0 || rmtAllowMask(rmt(i)) === False, "rmt allow mask mismatch")
     for (j <- i + 1 until spec.numArchitecturalRegs) {
       assert(rmt(i) === 0 || rmt(i) =/= rmt(j), "RMT is not a bijection")
     }
@@ -57,7 +57,7 @@ case class RenameUnit[T <: PolymorphicDataChain](dataType: HardType[T])
 
   // Check CMT invariants
   for (i <- 0 until spec.numArchitecturalRegs) {
-    assert(cmt(i) === 0 || cmtAllowMask(cmt(i)) === False)
+    assert(cmt(i) === 0 || cmtAllowMask(cmt(i)) === False, "cmt allow mask mismatch")
     for (j <- i + 1 until spec.numArchitecturalRegs) {
       assert(cmt(i) === 0 || cmt(i) =/= cmt(j), "CMT is not a bijection")
     }
@@ -114,6 +114,7 @@ case class RenameUnit[T <: PolymorphicDataChain](dataType: HardType[T])
           True -> (allocOk && thisAllocOk),
           False -> allocOk
         )
+        // FIXME: This is incorrect!
         localAllowMask = localAllowMask.clone()
         localAllowMask(index) := False
         when(io.output.fire) {
