@@ -123,10 +123,15 @@ case class PrfUnit() extends Area {
         .zip(state.table.map(_.dataAvailable))
         .map(x => !x._1 && x._2)
       for ((isRising, i) <- rising.zipWithIndex) {
-        val notifyCount = Vec(notifiers.map(x => x._1 && x._2 === i))
+        val notifyCount = Vec(
+          notifiers
+            .map(x => x._1 && x._2 === i)
+            .map(x => RegNext(next = x, init = False))
+        )
           .countForVerification(x => x)
         assert(
-          (isRising && notifyCount === 1) || (!isRising && notifyCount === 0)
+          (isRising && notifyCount === 1) || (!isRising && notifyCount === 0),
+          "notify/data mismatch"
         )
       }
     }
@@ -161,12 +166,7 @@ case class PrfInterface(unit: PrfUnit) {
   }
 
   def notify(enable: Bool, index: UInt): Unit = {
-    unit.notifiers += (
-      (
-        RegNext(next = enable, init = False),
-        RegNext(next = index)
-      )
-    )
+    unit.notifiers += ((enable, index))
 
     /*when(enable) {
       val s: Seq[Any] =

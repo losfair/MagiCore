@@ -67,6 +67,8 @@ class TestIssue extends AnyFunSuite {
       dataType = HardType(TestPayload())
     )
 
+    issue.io.issueAvailable.foreach(x => x := True)
+
     val prfIf = Machine.get[PrfInterface]
 
     val io = new Bundle {

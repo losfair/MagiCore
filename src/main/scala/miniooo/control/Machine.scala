@@ -64,6 +64,9 @@ object Machine {
 class Machine {
   private val singletons = scala.collection.mutable.Map[ClassTag[_], Any]()
   def provide[T: ClassTag](value: T) {
+    if (singletons.contains(classTag[T])) {
+      throw new Exception(s"${classTag[T]} is already provided")
+    }
     singletons(classTag[T]) = value
   }
 

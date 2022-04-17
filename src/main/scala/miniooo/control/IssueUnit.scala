@@ -154,7 +154,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
           out.valid := valid
 
           // Initial wakeup
-          out.wakeUp := prf.state.table(physRegIndex).dataAvailable
+          out.wakeUp := prf.state.table(physRegIndex).dataAvailable | prf.listen(physRegIndex)
 
           out.physRegIndex := physRegIndex
           out
@@ -166,7 +166,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
       predicate = i => c.portSpecs(i).staticTag === decodeInfo.functionUnitTag,
       generate = x => U(x, log2Up(c.portSpecs.size) bits)
     )
-    assert(!enable || portIndexOk)
+    assert(!enable || portIndexOk, "invalid port index")
     t.portIndex := portIndex
 
     val iqFreeMask = SetFromFirstOne(Vec(iqTagSpace.map(!_.valid)))
@@ -186,7 +186,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
         True -> (allocated + 1)
       )
       when(cond) {
-        assert(!iqTagSpace(i).valid)
+        assert(!iqTagSpace(i).valid, "refusing to overwrite IQ entry")
         iqDataAddr := i
         when(enable) {
           iqTagSpace(i) := t
@@ -196,7 +196,10 @@ case class IssueQueue[T <: PolymorphicDataChain](
 
     incPriority := notFull & enable
 
-    assert((notFull && allocated === 1) || (!notFull && allocated === 0))
+    assert(
+      (notFull && allocated === 1) || (!notFull && allocated === 0),
+      Seq("invalid IQ allocation notFull=", notFull, " allocated=", allocated)
+    )
     (notFull & enable, iqDataAddr)
   }
 
@@ -251,7 +254,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
   }
 
   def commitPop(index: UInt) {
-    assert(iqTagSpace(index).valid)
+    assert(iqTagSpace(index).valid, "invalid IQ pop")
     iqTagSpace(index).valid := False
   }
 }
@@ -311,7 +314,8 @@ case class IssueUnit[T <: PolymorphicDataChain](
     }
 
     assert(
-      (nextReady && ready) || (!nextReady && !ready)
+      (nextReady && ready) || (!nextReady && !ready),
+      "control status changed"
     ) // data might be different but control status must not change
 
     val iqContent =
@@ -353,7 +357,7 @@ case class IssueUnit[T <: PolymorphicDataChain](
       for (b <- issueOk) {
         issueCount = issueCount + b.asUInt.resized
       }
-      assert(issueCount === 1)
+      assert(issueCount === 1, "issue count mismatch")
     }
 
     when(unifiedIssuePort.fire) {
