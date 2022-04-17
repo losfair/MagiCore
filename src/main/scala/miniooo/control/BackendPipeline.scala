@@ -33,22 +33,26 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
     val unit = fu.generate(HardType(issue.issueDataType))
     issue.io
       .issuePorts(i)
-      .asInstanceOf[Stream[PolymorphicDataChain]] >> unit.io_input
+      .asInstanceOf[Stream[PolymorphicDataChain]]
+      .pipelined(m2s = !fu.lowLatency, s2m = !fu.lowLatency) >> unit.io_input
       .setCompositeName(this, "function_unit_input_" + i)
       .asInstanceOf[Stream[PolymorphicDataChain]]
     unit.io_output.setCompositeName(
       this,
       "function_unit_output_" + i
-    ).pipelined(m2s = !fu.lowLatency, s2m = !fu.lowLatency) >> dispatch.io.commit(i)
+    ) >> dispatch.io.commit(i)
     issue.io.issueAvailable(i) := unit.io_available
   }
 
   val io = new Bundle {
     val input = Stream(inputType)
 
-    val writebackMonitor = Vec(Flow(CommitRequest(dispatch.dataType)), spec.commitWidth)
+    val writebackMonitor =
+      Vec(Flow(CommitRequest(dispatch.dataType)), spec.commitWidth)
   }
 
   io.input >> rename.io.input
-  dispatch.io.writebackMonitor.zip(io.writebackMonitor).foreach(x => x._1 >> x._2)
+  dispatch.io.writebackMonitor
+    .zip(io.writebackMonitor)
+    .foreach(x => x._1 >> x._2)
 }
