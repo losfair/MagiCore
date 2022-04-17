@@ -26,7 +26,7 @@ case class LvtMem[T <: Data](wordType: HardType[T], wordCount: Int)
 
   Component.current.afterElaboration {
     val mems = writePorts.map(_ => Mem(wordType, wordCount))
-    val rat =
+    val lvt =
       if (writePorts.size > 1)
         Vec(Reg(UInt(log2Up(writePorts.size) bits)) init (0), wordCount)
       else null
@@ -34,9 +34,9 @@ case class LvtMem[T <: Data](wordType: HardType[T], wordCount: Int)
     for (((mem, wp), i) <- mems.zip(writePorts).zipWithIndex) {
       val (address, input, enable) = wp
       mem.write(address = address, data = input, enable = enable)
-      if (rat != null) {
+      if (lvt != null) {
         when(enable) {
-          rat(address) := U(i, log2Up(writePorts.size) bits)
+          lvt(address) := U(i, log2Up(writePorts.size) bits)
         }
       }
     }
@@ -48,8 +48,8 @@ case class LvtMem[T <: Data](wordType: HardType[T], wordCount: Int)
           mem.readAsync(address = address, readUnderWrite = writeFirst)
         )
       )
-      if (rat != null) {
-        output := readRsps(rat(address))
+      if (lvt != null) {
+        output := readRsps(lvt(address))
       } else {
         if (readRsps.size == 0) {
           output.assignDontCare()
