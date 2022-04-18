@@ -98,17 +98,6 @@ case class IssueQueue[T <: PolymorphicDataChain](
   println("IqTag width: " + IqTag().getBitsWidth)
 
   val iqTagSpace = Vec(Reg(IqTag()) init (IqTag.idle), spec.issueQueueSize)
-  val physRegBusyMask: Vec[Bool] = Vec(
-    (0 until spec.numPhysicalRegs).map(i =>
-      iqTagSpace
-        .map(x =>
-          x.valid && x.dependencies
-            .map(y => y.valid && y.physRegIndex === i)
-            .orR
-        )
-        .orR
-    )
-  )
 
   // Wakeup logic
   for (t <- iqTagSpace) {
