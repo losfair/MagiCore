@@ -41,7 +41,8 @@ case class IssuePort[T <: Data](hardType: HardType[T])
 }
 
 case class IssueSpec(
-    staticTag: Data
+    staticTag: Data,
+    warnOnBlockedIssue: Boolean
 )
 
 case class IssueQueue[T <: PolymorphicDataChain](
@@ -310,7 +311,8 @@ case class IssueUnit[T <: PolymorphicDataChain](
     val (ok, index) = iq.queryPop(io.issueAvailable)
     issueRequest.valid := ok
     issueRequest.payload.index := index
-    issueRequest.check() // only check control - payload is checked after the s2m stage
+    issueRequest
+      .check() // only check control - payload is checked after the s2m stage
     when(issueRequest.fire) {
       iq.preparePop(index)
     }
@@ -359,6 +361,12 @@ case class IssueUnit[T <: PolymorphicDataChain](
         fu.valid := unifiedIssuePort.valid
         unifiedIssuePort.ready := fu.ready
         issueOk(fuIndex) := True
+      }
+
+      if (c.portSpecs(fuIndex).warnOnBlockedIssue) {
+        when(fu.valid && !fu.ready) {
+          report(Seq("warning: function unit " + fuIndex + " blocked issue"))
+        }
       }
     }
 

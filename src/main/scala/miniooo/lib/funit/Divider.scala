@@ -14,8 +14,7 @@ case class DividerOperation() extends Bundle with PolymorphicDataChain {
 }
 
 final case class Divider(staticTag: Data) extends FunctionUnit {
-  override def lowLatency = false
-
+  override def warnOnBlockedIssue = true
   override def generate(
       hardType: HardType[_ <: PolymorphicDataChain]
   ): FunctionUnitInstance = {
@@ -34,12 +33,23 @@ final case class Divider(staticTag: Data) extends FunctionUnit {
         val robIndex = spec.robEntryIndexType()
       }
 
-      val io_available = Bool()
       val io_input = Stream(hardType())
       val io_output = Stream(CommitRequest(null))
 
-      io_available := False
-      io_input.setBlocked()
+      val buffered_input = io_input.s2mPipe()
+
+      val buffered_count = Reg(UInt(3 bits)) init(0)
+      when(io_input.fire && !io_output.fire) {
+        assert(buffered_count =/= buffered_count.maxValue, "buffered_count overflow")
+        buffered_count := buffered_count + 1
+      }
+      when(!io_input.fire && io_output.fire) {
+        assert(buffered_count =/= 0, "buffered_count underflow")
+        buffered_count := buffered_count - 1
+      }
+      val io_available = buffered_count === 0
+
+      buffered_input.setBlocked()
       io_output.setIdle()
 
       val rt = Reg(RtCtx())
@@ -47,14 +57,13 @@ final case class Divider(staticTag: Data) extends FunctionUnit {
       val fsm = new StateMachine {
         val init: State = new State with EntryPoint {
           whenIsActive {
-            io_available := True
-            io_input.ready := True
-            when(io_input.valid) {
-              val dispatchInfo = io_input.payload.lookup[DispatchInfo]
-              val issue = io_input.payload.lookup[IssuePort[_]]
+            buffered_input.ready := True
+            when(buffered_input.valid) {
+              val dispatchInfo = buffered_input.payload.lookup[DispatchInfo]
+              val issue = buffered_input.payload.lookup[IssuePort[_]]
 
               val newRt = RtCtx()
-              newRt.op := io_input.payload.lookup[DividerOperation]
+              newRt.op := buffered_input.payload.lookup[DividerOperation]
               newRt.aNeg := issue.srcRegData(0)(31)
               newRt.bNeg := issue.srcRegData(1)(31)
               newRt.dividend := issue.srcRegData(0)

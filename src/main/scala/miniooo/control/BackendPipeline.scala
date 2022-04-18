@@ -19,7 +19,7 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
   val dispatch = DispatchUnit(HardType(rename.outType))
   val issue = IssueUnit(
     c = IssueConfig(portSpecs =
-      sem.functionUnits.map(u => IssueSpec(staticTag = u.staticTag))
+      sem.functionUnits.map(u => IssueSpec(staticTag = u.staticTag, warnOnBlockedIssue = u.warnOnBlockedIssue))
     ),
     dataType = HardType(dispatch.outType)
   )
@@ -33,8 +33,7 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
     val unit = fu.generate(HardType(issue.issueDataType))
     issue.io
       .issuePorts(i)
-      .asInstanceOf[Stream[PolymorphicDataChain]]
-      .pipelined(m2s = !fu.lowLatency, s2m = !fu.lowLatency) >> unit.io_input
+      .asInstanceOf[Stream[PolymorphicDataChain]] >> unit.io_input
       .setCompositeName(this, "function_unit_input_" + i)
       .asInstanceOf[Stream[PolymorphicDataChain]]
     unit.io_output.setCompositeName(
