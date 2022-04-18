@@ -188,7 +188,7 @@ class TestBackendPipeline extends AnyFunSuite {
       caseCount.update("MUL", 0)
       caseCount.update("DIV_U", 0)
 
-      val testSize = 5000
+      val testSize = 50000
       var writebackCount = 0
 
       fork {
