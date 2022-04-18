@@ -21,7 +21,7 @@ class MiniGen extends Component {
   }
 
   val mspec = MachineSpec(
-    numArchitecturalRegs = 16,
+    numArchitecturalRegs = 32,
     numPhysicalRegs = 64,
     dataWidth = 64 bits,
     maxNumSrcRegsPerInsn = 2,
@@ -34,7 +34,7 @@ class MiniGen extends Component {
 
   val msem = new MachineSemantics {
     def functionUnits: Seq[FunctionUnit] = Seq(
-      new Alu(TestTag.static(0), AluConfig(alu32 = true), lowLatency = true),
+      new Alu(TestTag.static(0), AluConfig(alu32 = true)),
       new Multiplier(TestTag.static(1), MultiplierConfig()),
       new Divider(TestTag.static(2))
     )
