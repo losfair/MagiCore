@@ -160,27 +160,31 @@ class TestBackendPipeline extends AnyFunSuite {
       waitUntil(dut.clockDomain.isResetAsserted)
       waitUntil(dut.clockDomain.isResetDeasserted)
 
-      // Zero out registers
+      val mirror =
+        (0 until mspec.numArchitecturalRegs)
+          .map(_ => BigInt(Random.nextInt(100000)))
+          .to[ArrayBuffer]
+
+      // Init registers
       for (i <- 0 until mspec.numArchitecturalRegs) {
+        val value = mirror(i)
         dut.io.input.simWrite(
           dut,
           p => {
             MockPayload.create(
               p,
               t = 0,
-              rs1 = Some(i),
-              rs2 = Some(i),
+              rs1 = None,
+              rs2 = None,
+              const = Some(value),
               rd = Some(i),
-              opc = GenericOpcode.XOR
+              opc = GenericOpcode.MOV
             )
           }
         )
       }
 
       dut.clockDomain.waitSampling(100) // wait for preparation
-
-      val mirror =
-        (0 until mspec.numArchitecturalRegs).map(_ => BigInt(0)).to[ArrayBuffer]
 
       val caseCount: mutable.Map[String, Int] = mutable.Map()
       caseCount.update("LD_CONST", 0)
@@ -328,6 +332,7 @@ class TestBackendPipeline extends AnyFunSuite {
         dut.clockDomain.waitSampling()
         val data = dut.io.regReadData.toBigInt
         assert(data == mirror(i), "value validation failed for reg " + i)
+        println("reg " + i + ": " + data)
       }
       println("validation ok")
     }
