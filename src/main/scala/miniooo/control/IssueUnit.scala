@@ -71,6 +71,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
 
   case class IqTag() extends Bundle {
     val valid = Bool()
+    val pending = Bool()
     val priority = UInt(log2Up(spec.issueQueueSize) bits)
     val dependencies = Vec(IqDependency(), spec.maxNumSrcRegsPerInsn)
     val portIndex = UInt(log2Up(c.portSpecs.size) bits)
@@ -82,6 +83,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
     def idle: IqTag = {
       val tag = IqTag()
       tag.valid := False
+      tag.pending.assignDontCare()
       tag.portIndex.assignDontCare()
       tag.priority.assignDontCare()
       for (i <- 0 until spec.maxNumSrcRegsPerInsn) {
@@ -132,6 +134,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
     val decodeInfo = data.lookup[DecodeInfo]
 
     t.valid := True
+    t.pending := False
     t.priority := 0
     t.dependencies := Vec(
       decodeInfo.archSrcRegs
@@ -143,7 +146,8 @@ case class IssueQueue[T <: PolymorphicDataChain](
           out.valid := valid
 
           // Initial wakeup
-          out.wakeUp := prf.state.table(physRegIndex).dataAvailable | prf.listen(physRegIndex)
+          out.wakeUp := prf.state.table(physRegIndex).dataAvailable | prf
+            .listen(physRegIndex)
 
           out.physRegIndex := physRegIndex
           out
@@ -215,7 +219,11 @@ case class IssueQueue[T <: PolymorphicDataChain](
   def queryPop(issueAvailable: Vec[Bool]): (Bool, UInt) = {
     val (_, index, ok) = iqTagSpace.zipWithIndex
       .map({ case (x, i) =>
-        (x.priority, U(i, indexSize), x.canIssue && issueAvailable(x.portIndex))
+        (
+          x.priority,
+          U(i, indexSize),
+          x.canIssue && !x.pending && issueAvailable(x.portIndex)
+        )
       })
       .reduceBalancedTree((l, r) => {
         val prio = UInt(l._1.getWidth bits)
@@ -242,8 +250,15 @@ case class IssueQueue[T <: PolymorphicDataChain](
     (ok, index)
   }
 
+  def preparePop(index: UInt) {
+    assert(iqTagSpace(index).valid, "invalid IQ prepare pop")
+    assert(!iqTagSpace(index).pending, "IQ pending is already high")
+    iqTagSpace(index).pending := True
+  }
+
   def commitPop(index: UInt) {
-    assert(iqTagSpace(index).valid, "invalid IQ pop")
+    assert(iqTagSpace(index).valid, "invalid IQ commit pop")
+    assert(iqTagSpace(index).pending, "IQ pop without pending mark")
     iqTagSpace(index).valid := False
   }
 }
@@ -286,29 +301,31 @@ case class IssueUnit[T <: PolymorphicDataChain](
     )
   }
 
+  case class IssueRequest() extends Bundle {
+    val index = iq.indexType
+  }
+
   val issuePopLogic = new Area {
-    val commit = Bool()
-    val (nextReady, nextIndex) = iq.queryPop(io.issueAvailable)
-    val keep = Reg(Bool()) init (false) setWhen (nextReady) clearWhen (commit)
-    val rReady = Reg(Bool())
-    val rIndex = Reg(iq.indexType)
-
-    val ready = keep ? rReady | nextReady
-    val index = keep ? rIndex | nextIndex
-    rReady := ready
-    rIndex := index
-
-    when(commit) {
-      iq.commitPop(index)
+    val issueRequest = Stream(IssueRequest())
+    val (ok, index) = iq.queryPop(io.issueAvailable)
+    issueRequest.valid := ok
+    issueRequest.payload.index := index
+    issueRequest.check() // only check control - payload is checked after the s2m stage
+    when(issueRequest.fire) {
+      iq.preparePop(index)
     }
+  }
 
-    assert(
-      (nextReady && ready) || (!nextReady && !ready),
-      "control status changed"
-    ) // data might be different but control status must not change
+  val issuePopApplyLogic = new Area {
+    val issueRequest = issuePopLogic.issueRequest
+      .pipelined(m2s = true, s2m = true)
+      .check(payloadInvariance = true)
 
     val iqContent =
-      iqDataSpace.readAsync(address = index, readUnderWrite = writeFirst)
+      iqDataSpace.readAsync(
+        address = issueRequest.index,
+        readUnderWrite = writeFirst
+      )
     val renameInfo = iqContent.data.lookup[RenameInfo]
     val decodeInfo = iqContent.data.lookup[DecodeInfo]
 
@@ -317,12 +334,16 @@ case class IssueUnit[T <: PolymorphicDataChain](
 
     val unifiedIssuePort = Stream(issueDataType)
     unifiedIssuePort.setBlocked()
-    unifiedIssuePort.valid := ready
+    unifiedIssuePort.valid := issueRequest.valid
+    issueRequest.ready := unifiedIssuePort.ready
     unifiedIssuePort.payload.srcRegData := Vec(
       srcRegContent.map(x => x.data)
     )
     unifiedIssuePort.payload.data := iqContent.data
-    commit := unifiedIssuePort.fire
+
+    when(unifiedIssuePort.fire) {
+      iq.commitPop(issueRequest.payload.index)
+    }
 
     val issueOk = Vec(Bool(), io.issuePorts.size)
     for (b <- issueOk) b := False
@@ -350,7 +371,9 @@ case class IssueUnit[T <: PolymorphicDataChain](
     }
 
     when(unifiedIssuePort.fire) {
-      Machine.report(Seq("issued - mask ", issueOk.asBits, " iq index ", index))
+      Machine.report(
+        Seq("issued - mask ", issueOk.asBits, " iq index ", issueRequest.index)
+      )
       try {
         val dispatchInfo = iqContent.data.lookup[DispatchInfo]
         Machine.report(Seq("issued rob index is ", dispatchInfo.robIndex))

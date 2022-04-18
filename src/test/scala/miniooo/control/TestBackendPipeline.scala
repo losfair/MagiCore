@@ -33,7 +33,7 @@ class TestBackendPipeline extends AnyFunSuite {
     dataWidth = 32 bits,
     maxNumSrcRegsPerInsn = 2,
     maxNumDstRegsPerInsn = 1,
-    issueQueueSize = 32,
+    issueQueueSize = 16,
     functionUnitTagType = HardType(TestTag()),
     robSize = 32,
     commitWidth = 2
