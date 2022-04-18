@@ -4,23 +4,43 @@ import spinal.core._
 import spinal.lib._
 import miniooo.util._
 import MiniOoOExt._
+import scala.reflect._
 
 case class DispatchInfo(hardType: HardType[_ <: PolymorphicDataChain])
     extends Bundle
     with PolymorphicDataChain {
   private val spec = Machine.get[MachineSpec]
   val robIndex = spec.robEntryIndexType()
+  val epoch = spec.epochType()
   val parentObjects = if (hardType != null) Seq(hardType()) else Seq()
+
+  override def decodeAs[T <: AnyRef](ctag: ClassTag[T]): Option[T] = {
+    if (ctag == classTag[CommitToken]) {
+      val t = CommitToken()
+      t.robIndex := robIndex
+      t.epoch := epoch
+      return Some(t.asInstanceOf[T])
+    }
+    return None
+  }
+}
+
+case class CommitToken() extends Bundle with PolymorphicDataChain {
+  private val spec = Machine.get[MachineSpec]
+  val robIndex = spec.robEntryIndexType()
+  val epoch = spec.epochType()
+  val parentObjects = Seq()
 }
 
 case class CommitRequest(hardType: HardType[_ <: PolymorphicDataChain])
     extends Bundle
     with PolymorphicDataChain {
   private val spec = Machine.get[MachineSpec]
-  val robAddr = spec.robEntryIndexType()
+  val token = CommitToken()
   val regWriteValue = Vec(
     (0 until spec.maxNumDstRegsPerInsn).map(_ => spec.dataType)
   )
+  val exception = Bool()
   val parentObjects = if (hardType != null) Seq(hardType()) else Seq()
 }
 
@@ -31,7 +51,8 @@ case class RobEntry(hardType: HardType[_ <: PolymorphicDataChain])
 }
 
 case class DispatchUnit[T <: PolymorphicDataChain](
-    dataType: HardType[T]
+    dataType: HardType[T],
+    reset: Bool
 ) extends Area {
 
   private val spec = Machine.get[MachineSpec]
@@ -53,6 +74,8 @@ case class DispatchUnit[T <: PolymorphicDataChain](
     val writebackMonitor = Vec(Flow(CommitRequest(dataType)), spec.commitWidth)
   }
 
+  val currentEpoch = Reg(spec.epochType()) init (0)
+
   val rob = new Area {
 
     val debugCyc = Reg(UInt(64 bits)) init (0)
@@ -67,9 +90,15 @@ case class DispatchUnit[T <: PolymorphicDataChain](
     assert(spec.robSize % spec.commitWidth == 0)
     val robBankSize = spec.robSize / spec.commitWidth
 
-    val risingOccupancy = Reg(Bool()) init (false)
-    val pushPtr = Reg(spec.robEntryIndexType()) init (0)
-    val popPtr = Reg(spec.robEntryIndexType()) init (0)
+    val resetArea = new ResetArea(reset = reset, cumulative = true) {
+      val risingOccupancy = Reg(Bool()) init (false)
+      val pushPtr = Reg(spec.robEntryIndexType()) init (0)
+      val popPtr = Reg(spec.robEntryIndexType()) init (0)
+    }
+    val risingOccupancy = resetArea.risingOccupancy
+    val pushPtr = resetArea.pushPtr
+    val popPtr = resetArea.popPtr
+
     val ptrEq = popPtr === pushPtr
     val empty = ptrEq && !risingOccupancy
     val full = ptrEq && risingOccupancy
@@ -83,6 +112,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
       val output = outType
       output.parentObjects(0) := io.input.payload
       output.robIndex := pushPtr
+      output.epoch := currentEpoch
       io.output << io.input.translateWith(output).continueWhen(!full)
 
       val assignedBankIndex = getBankIndexForPtr(pushPtr)
@@ -109,13 +139,16 @@ case class DispatchUnit[T <: PolymorphicDataChain](
 
     val commitLogic = new Area {
       // Arbitrated commit
-      val commit = StreamArbiterFactory.roundRobin.on(io.commit)
+      val commit = {
+        val c = StreamArbiterFactory.roundRobin.on(io.commit)
+        c.throwWhen(c.payload.token.epoch =/= currentEpoch)
+      }
 
       val assignedBankIndex = getBankIndexForPtr(
-        commit.payload.robAddr
+        commit.payload.token.robIndex
       )
       val assignedEntryIndex = getEntryIndexForPtr(
-        commit.payload.robAddr
+        commit.payload.token.robIndex
       )
 
       commit.freeRun()
@@ -137,7 +170,8 @@ case class DispatchUnit[T <: PolymorphicDataChain](
             n := o
           }
         newEntry.commitRequest.regWriteValue := commit.payload.regWriteValue
-        newEntry.commitRequest.robAddr := commit.payload.robAddr
+        newEntry.commitRequest.exception := commit.payload.exception
+        newEntry.commitRequest.token := commit.payload.token
 
         val fireNow = assignedBankIndex === i && commit.valid
         b.write(
@@ -190,7 +224,9 @@ case class DispatchUnit[T <: PolymorphicDataChain](
             "commit rob entry cyc=",
             debugCyc,
             " at ",
-            commit.payload.robAddr
+            commit.payload.token.robIndex,
+            " epoch ",
+            commit.payload.token.epoch
           ) ++ renameInfo.physDstRegs
             .zip(
               decodeInfo.archDstRegs

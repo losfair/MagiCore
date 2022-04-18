@@ -89,12 +89,13 @@ case class PrfStateTableSnapshot(registered: Boolean = false) extends Bundle {
   }
 }
 
-case class PrfUnit() extends Area {
+case class PrfUnit(reset: Bool) extends Area {
   val listeners = new ArrayBuffer[(UInt, Bool)]() // (index, wakeUp)
   val notifiers = new ArrayBuffer[(Bool, UInt)]() // (enable, index)
   val content = LvtMem(PrfItem(), Machine.get[MachineSpec].numPhysicalRegs)
-  val state =
-    PrfStateTableSnapshot(registered = true)
+  val state = new ResetArea(reset = reset, cumulative = true) {
+    val v = PrfStateTableSnapshot(registered = true)
+  }.v
 
   def interface = PrfInterface(this)
 

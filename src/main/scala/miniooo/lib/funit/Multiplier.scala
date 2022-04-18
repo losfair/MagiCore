@@ -29,25 +29,26 @@ case class Multiplier(staticTag: Data, c: MultiplierConfig) extends FunctionUnit
       case class Payload() extends Bundle {
         val a = spec.dataType
         val b = spec.dataType
-        val robIndex = spec.robEntryIndexType()
+        val token = CommitToken()
       }
 
       val initialPayload = Payload()
       initialPayload.a := issue.srcRegData(0)
       initialPayload.b := issue.srcRegData(1)
-      initialPayload.robIndex := dispatchInfo.robIndex
+      initialPayload.token := dispatchInfo.lookup[CommitToken]
       val stream = io_input.translateWith(initialPayload).stage()
 
       case class Intermediate() extends Bundle {
         val value = spec.dataType
-        val robIndex = spec.robEntryIndexType()
+        val token = CommitToken()
       }
       val stage1Payload = Intermediate()
       stage1Payload.value := (stream.payload.a.asUInt * stream.payload.b.asUInt).asBits.resized
-      stage1Payload.robIndex := stream.payload.robIndex
+      stage1Payload.token := stream.payload.token
       val stage1 = stream.translateWith(stage1Payload).stage()
 
-      out.robAddr := stage1.payload.robIndex
+      out.token := stage1.payload.token
+      out.exception := False
       out.regWriteValue(0) := stage1.payload.value
       io_output << stage1.translateWith(out)
     }

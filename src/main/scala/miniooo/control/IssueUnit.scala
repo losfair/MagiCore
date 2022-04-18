@@ -48,7 +48,8 @@ case class IssueSpec(
 
 case class IssueQueue[T <: PolymorphicDataChain](
     c: IssueConfig,
-    dataType: HardType[T]
+    dataType: HardType[T],
+    reset: Bool
 ) extends Area {
   private val spec = Machine.get[MachineSpec]
   private val prf = Machine.get[PrfInterface]
@@ -107,7 +108,9 @@ case class IssueQueue[T <: PolymorphicDataChain](
 
   println("IqTag width: " + IqTag().getBitsWidth)
 
-  val iqTagSpace = Vec(Reg(IqTag()) init (IqTag.idle), spec.issueQueueSize)
+  val iqTagSpace = new ResetArea(reset = reset, cumulative = true) {
+    val v = Vec(Reg(IqTag()) init (IqTag.idle), spec.issueQueueSize)
+  }.v
 
   val fastWakeupValid = Bool()
   val fastWakeupIndex = UInt(log2Up(spec.numPhysicalRegs) bits)
@@ -145,7 +148,9 @@ case class IssueQueue[T <: PolymorphicDataChain](
 
   // Verification
   {
-    val prev = Vec(iqTagSpace.map(x => RegNext(next = x, init = IqTag.idle)))
+    val prev = new ResetArea(reset = reset, cumulative = true) {
+      val v = Vec(iqTagSpace.map(x => RegNext(next = x, init = IqTag.idle)))
+    }.v
     for ((prev, next) <- prev.zip(iqTagSpace)) {
       when(prev.valid && !prev.canIssue && !next.valid) {
         assert(False, "detected invalid issue event")
@@ -304,7 +309,8 @@ case class IssueQueue[T <: PolymorphicDataChain](
 
 case class IssueUnit[T <: PolymorphicDataChain](
     c: IssueConfig,
-    dataType: HardType[T]
+    dataType: HardType[T],
+    reset: Bool
 ) extends Area {
   private val spec = Machine.get[MachineSpec]
   private val prf = Machine.get[PrfInterface]
@@ -322,7 +328,7 @@ case class IssueUnit[T <: PolymorphicDataChain](
     val issueMonitor = Flow(issueDataType)
   }
 
-  val iq = IssueQueue(c = c, dataType = dataType)
+  val iq = IssueQueue(c = c, dataType = dataType, reset = reset)
   val iqDataSpace = Mem(IqData(), spec.issueQueueSize)
   println("IqData width: " + IqData().getBitsWidth)
 

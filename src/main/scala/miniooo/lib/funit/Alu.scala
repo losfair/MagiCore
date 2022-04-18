@@ -40,7 +40,8 @@ case class Alu(staticTag: Data, c: AluConfig) extends FunctionUnit {
       val issue = in.lookup[IssuePort[_]]
       val a = issue.srcRegData(0).asUInt
       val b = op.useConst ? op.const.asUInt | issue.srcRegData(1).asUInt
-      out.robAddr := dispatchInfo.robIndex
+      out.token := dispatchInfo.lookup[CommitToken]
+      out.exception := False
 
       val outValue = UInt(out.regWriteValue(0).getWidth bits)
       outValue.assignDontCare()

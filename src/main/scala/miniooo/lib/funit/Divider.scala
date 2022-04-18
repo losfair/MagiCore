@@ -30,7 +30,7 @@ final case class Divider(staticTag: Data) extends FunctionUnit {
         val quotient = spec.dataType
         val remainder = spec.dataType
         val counter = UInt(log2Up(spec.dataWidth.value) bits)
-        val robIndex = spec.robEntryIndexType()
+        val token = CommitToken()
       }
 
       val io_input = Stream(hardType())
@@ -71,7 +71,7 @@ final case class Divider(staticTag: Data) extends FunctionUnit {
               newRt.quotient := 0
               newRt.remainder := 0
               newRt.counter := 0
-              newRt.robIndex := dispatchInfo.robIndex
+              newRt.token := dispatchInfo.lookup[CommitToken]
               Machine.report(Seq("begin division: ", issue.srcRegData(0), " ", issue.srcRegData(1)))
               rt := newRt
               goto(work)
@@ -121,7 +121,8 @@ final case class Divider(staticTag: Data) extends FunctionUnit {
               )
               .resize(spec.dataWidth)
             io_output.valid := True
-            io_output.payload.robAddr := rt.robIndex
+            io_output.payload.token := rt.token
+            io_output.payload.exception := False
             io_output.payload.regWriteValue(0) := out
             when(io_output.ready) {
               Machine.report(Seq("end division: ", out))

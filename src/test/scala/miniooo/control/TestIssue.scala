@@ -55,7 +55,9 @@ class TestIssue extends AnyFunSuite {
   class IssueTop extends Component {
     Machine.provide(mspec)
 
-    val prf = PrfUnit()
+    val reset = False
+
+    val prf = PrfUnit(reset = reset)
     Machine.provide(prf.interface)
 
     val issue = IssueUnit(
@@ -64,7 +66,8 @@ class TestIssue extends AnyFunSuite {
           IssueSpec(staticTag = TestTag.static(i), warnOnBlockedIssue = false)
         )
       ),
-      dataType = HardType(TestPayload())
+      dataType = HardType(TestPayload()),
+      reset = reset
     )
 
     issue.io.issueAvailable.foreach(x => x := True)

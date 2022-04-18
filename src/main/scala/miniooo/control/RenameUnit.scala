@@ -16,8 +16,10 @@ case class RenameInfo(inner: HardType[_ <: PolymorphicDataChain])
   val parentObjects = if (inner != null) Seq(inner()) else Seq()
 }
 
-case class RenameUnit[T <: PolymorphicDataChain](dataType: HardType[T])
-    extends Area {
+case class RenameUnit[T <: PolymorphicDataChain](
+    dataType: HardType[T],
+    reset: Bool
+) extends Area {
   private val spec = Machine.get[MachineSpec]
   case class RmtEntry() extends Bundle {
     val physRegIndex = spec.physRegIndexType
@@ -41,7 +43,10 @@ case class RenameUnit[T <: PolymorphicDataChain](dataType: HardType[T])
 
   // Check RMT invariants
   for (i <- 0 until spec.numArchitecturalRegs) {
-    assert(rmt(i) === 0 || rmtAllowMask(rmt(i)) === False, "rmt allow mask mismatch")
+    assert(
+      rmt(i) === 0 || rmtAllowMask(rmt(i)) === False,
+      "rmt allow mask mismatch"
+    )
     for (j <- i + 1 until spec.numArchitecturalRegs) {
       assert(rmt(i) === 0 || rmt(i) =/= rmt(j), "RMT is not a bijection")
     }
@@ -57,7 +62,10 @@ case class RenameUnit[T <: PolymorphicDataChain](dataType: HardType[T])
 
   // Check CMT invariants
   for (i <- 0 until spec.numArchitecturalRegs) {
-    assert(cmt(i) === 0 || cmtAllowMask(cmt(i)) === False, "cmt allow mask mismatch")
+    assert(
+      cmt(i) === 0 || cmtAllowMask(cmt(i)) === False,
+      "cmt allow mask mismatch"
+    )
     for (j <- i + 1 until spec.numArchitecturalRegs) {
       assert(cmt(i) === 0 || cmt(i) =/= cmt(j), "CMT is not a bijection")
     }
@@ -66,9 +74,11 @@ case class RenameUnit[T <: PolymorphicDataChain](dataType: HardType[T])
   // SRC refcount
   val srcRefcountWidth = 3 bits
   def srcRefcountType = UInt(srcRefcountWidth)
-  val srcRefcount = Vec(
-    (0 until spec.numPhysicalRegs).map(_ => Reg(srcRefcountType) init (0))
-  )
+  val srcRefcount = new ResetArea(reset = reset, cumulative = true) {
+    val v = Vec(
+      (0 until spec.numPhysicalRegs).map(_ => Reg(srcRefcountType) init (0))
+    )
+  }.v
   val zeroRefcountMask = Vec(srcRefcount.map(x => x === 0))
 
   val incRefcount = Vec(Bool(), spec.numPhysicalRegs)
@@ -170,6 +180,11 @@ case class RenameUnit[T <: PolymorphicDataChain](dataType: HardType[T])
           Seq("[v=", arch.valid, ",arch=", arch.index, ",phys=", phys, "]")
         })
     )
+  }
+
+  when(reset) {
+    rmt := cmt
+    rmtAllowMask := cmtAllowMask
   }
 }
 

@@ -10,13 +10,16 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
   private val spec = Machine.get[MachineSpec]
   private val sem = Machine.get[MachineSemantics]
 
-  val prf = PrfUnit()
+  val reset = Bool()
+  reset := False
+
+  val prf = PrfUnit(reset = reset)
   Machine.provide(prf.interface)
 
-  val rename = RenameUnit(inputType)
+  val rename = RenameUnit(dataType = inputType, reset = reset)
   Machine.provide(RenameInterface(rename))
 
-  val dispatch = DispatchUnit(HardType(rename.outType))
+  val dispatch = DispatchUnit(dataType = HardType(rename.outType), reset = reset)
   val issue = IssueUnit(
     c = IssueConfig(portSpecs =
       sem.functionUnits.map(u =>
@@ -27,7 +30,8 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
         )
       )
     ),
-    dataType = HardType(dispatch.outType)
+    dataType = HardType(dispatch.outType),
+    reset = reset
   )
 
   rename.io.output >> dispatch.io.input
