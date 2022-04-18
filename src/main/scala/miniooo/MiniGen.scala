@@ -28,7 +28,7 @@ class MiniGen extends Component {
     maxNumDstRegsPerInsn = 1,
     issueQueueSize = 16,
     functionUnitTagType = HardType(TestTag()),
-    robSize = 32,
+    robSize = 64,
     commitWidth = 2
   )
 

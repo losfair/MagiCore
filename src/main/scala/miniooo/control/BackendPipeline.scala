@@ -24,7 +24,7 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
     dataType = HardType(dispatch.outType)
   )
 
-  rename.io.output >/-> dispatch.io.input
+  rename.io.output >> dispatch.io.input
   dispatch.io.output >/-> issue.io.input
   issue.io.issueMonitor.translateWith(
     issue.io.issueMonitor.payload.toPhysSrcRegActivationMask()
