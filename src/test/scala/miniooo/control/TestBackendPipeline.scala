@@ -203,8 +203,14 @@ class TestBackendPipeline extends AnyFunSuite {
       }
 
       val startCycles = dut.io.cycles.toBigInt
+      var delayCount = 0
 
       for (i <- 0 until testSize) {
+        val thisDelay = if (Random.nextInt(50) < 2) Random.nextInt(5) else 0
+        if (thisDelay != 0) {
+          delayCount += thisDelay
+          dut.clockDomain.waitSampling(thisDelay)
+        }
         val op = Random.nextInt(100)
         op match {
           case x if 0 until 10 contains x =>
@@ -305,6 +311,9 @@ class TestBackendPipeline extends AnyFunSuite {
       val endCycles = dut.io.cycles.toBigInt
       println(
         "Finished " + testSize + " instructions in " + (endCycles - startCycles) + " cycles. IPC=" + (testSize.toDouble / (endCycles - startCycles).toDouble)
+      )
+      println(
+        "Total inserted delay is " + delayCount + " so minimum possible cycle count is " + (testSize + delayCount) + "."
       )
 
       dut.clockDomain.waitSampling(100)
