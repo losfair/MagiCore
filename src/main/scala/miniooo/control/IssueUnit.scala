@@ -42,6 +42,7 @@ case class IssuePort[T <: Data](hardType: HardType[T])
 
 case class IssueSpec(
     staticTag: Data,
+    fastWakeup: Boolean = false,
     warnOnBlockedIssue: Boolean
 )
 
@@ -53,6 +54,8 @@ case class IssueQueue[T <: PolymorphicDataChain](
   private val prf = Machine.get[PrfInterface]
   val indexSize = log2Up(spec.issueQueueSize) bits
   def indexType = UInt(indexSize)
+
+  val fastWakeupable = Vec(c.portSpecs.map(x => Bool(x.fastWakeup)))
 
   case class IqDependency() extends Bundle {
     val valid = Bool()
@@ -74,6 +77,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
     val valid = Bool()
     val pending = Bool()
     val priority = UInt(log2Up(spec.issueQueueSize) bits)
+    val canFastWakeup = Bool()
     val dependencies = Vec(IqDependency(), spec.maxNumSrcRegsPerInsn)
     val portIndex = UInt(log2Up(c.portSpecs.size) bits)
 
@@ -87,6 +91,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
       tag.pending.assignDontCare()
       tag.portIndex.assignDontCare()
       tag.priority.assignDontCare()
+      tag.canFastWakeup.assignDontCare()
       for (i <- 0 until spec.maxNumSrcRegsPerInsn) {
         tag.dependencies(i) := IqDependency.idle
       }
@@ -94,19 +99,38 @@ case class IssueQueue[T <: PolymorphicDataChain](
     }
   }
 
-  case class IqData() extends Bundle {
-    val data = dataType()
+  case class FastWakeupDst() extends Bundle {
+    val valid = Bool()
+    val index = UInt(log2Up(spec.numPhysicalRegs) bits)
   }
+  val fastWakeupMem = Mem(FastWakeupDst(), spec.issueQueueSize)
 
   println("IqTag width: " + IqTag().getBitsWidth)
 
   val iqTagSpace = Vec(Reg(IqTag()) init (IqTag.idle), spec.issueQueueSize)
 
+  val fastWakeupValid = Bool()
+  val fastWakeupIndex = UInt(log2Up(spec.numPhysicalRegs) bits)
+
+  // A dependency is woke up in the next cycle if:
+  // - the register will be in `dataAvailable` state the next cycle
+  // - the instruction is an ALU operation, this dependency comes from another
+  //   ALU operation, and that ALU operation has been issued
+  def listenOnPhysRegIndex(canFastWakeup: Bool, index: UInt): Bool = {
+    prf.listen(
+      index
+    ) | (canFastWakeup && fastWakeupValid && (index === fastWakeupIndex))
+  }
+
   // Wakeup logic
-  for (t <- iqTagSpace) {
-    for (dep <- t.dependencies) {
+  for ((t, i) <- iqTagSpace.zipWithIndex) {
+    for ((dep, depIndex) <- t.dependencies.zipWithIndex) {
       val wakeUp = prf.listen(dep.physRegIndex)
-      dep.wakeUp := dep.wakeUp | wakeUp
+
+      dep.wakeUp := dep.wakeUp | listenOnPhysRegIndex(
+        canFastWakeup = t.canFastWakeup,
+        index = dep.physRegIndex
+      )
     }
   }
 
@@ -147,8 +171,12 @@ case class IssueQueue[T <: PolymorphicDataChain](
           out.valid := valid
 
           // Initial wakeup
-          out.wakeUp := prf.state.table(physRegIndex).dataAvailable | prf
-            .listen(physRegIndex)
+          out.wakeUp := prf.state
+            .table(physRegIndex)
+            .dataAvailable | listenOnPhysRegIndex(
+            canFastWakeup = t.canFastWakeup,
+            index = physRegIndex
+          )
 
           out.physRegIndex := physRegIndex
           out
@@ -162,6 +190,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
     )
     assert(!enable || portIndexOk, "invalid port index")
     t.portIndex := portIndex
+    t.canFastWakeup := fastWakeupable(portIndex)
 
     val iqFreeMask = SetFromFirstOne(Vec(iqTagSpace.map(!_.valid)))
     val notFull = iqFreeMask.orR
@@ -188,13 +217,22 @@ case class IssueQueue[T <: PolymorphicDataChain](
       }
     }
 
-    incPriority := notFull & enable
+    val fire = notFull & enable
+
+    val fastWakeup = FastWakeupDst()
+    fastWakeup.valid := fastWakeupable(portIndex) && decodeInfo
+      .archDstRegs(0)
+      .valid
+    fastWakeup.index := renameInfo.physDstRegs(0)
+    fastWakeupMem.write(address = iqDataAddr, data = fastWakeup, enable = fire)
+
+    incPriority := fire
 
     assert(
       (notFull && allocated === 1) || (!notFull && allocated === 0),
       Seq("invalid IQ allocation notFull=", notFull, " allocated=", allocated)
     )
-    (notFull & enable, iqDataAddr)
+    (fire, iqDataAddr)
   }
 
   def report(): Seq[Any] = {
@@ -313,9 +351,12 @@ case class IssueUnit[T <: PolymorphicDataChain](
     issueRequest.payload.index := index
     issueRequest
       .check() // only check control - payload is checked after the s2m stage
+    val fastWakeup = iq.fastWakeupMem(index)
     when(issueRequest.fire) {
       iq.preparePop(index)
     }
+    iq.fastWakeupValid := issueRequest.fire && fastWakeup.valid
+    iq.fastWakeupIndex := fastWakeup.index
   }
 
   val issuePopApplyLogic = new Area {

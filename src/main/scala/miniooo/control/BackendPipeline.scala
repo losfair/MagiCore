@@ -19,7 +19,13 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
   val dispatch = DispatchUnit(HardType(rename.outType))
   val issue = IssueUnit(
     c = IssueConfig(portSpecs =
-      sem.functionUnits.map(u => IssueSpec(staticTag = u.staticTag, warnOnBlockedIssue = u.warnOnBlockedIssue))
+      sem.functionUnits.map(u =>
+        IssueSpec(
+          staticTag = u.staticTag,
+          warnOnBlockedIssue = u.warnOnBlockedIssue,
+          fastWakeup = u.isAlu
+        )
+      )
     ),
     dataType = HardType(dispatch.outType)
   )

@@ -23,6 +23,7 @@ case class AluOperation() extends Bundle with PolymorphicDataChain {
 }
 
 case class Alu(staticTag: Data, c: AluConfig) extends FunctionUnit {
+  override def isAlu: Boolean = true
   override def generate(
       hardType: HardType[_ <: PolymorphicDataChain]
   ): FunctionUnitInstance = {
