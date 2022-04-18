@@ -23,7 +23,7 @@ class MiniGen extends Component {
   val mspec = MachineSpec(
     numArchitecturalRegs = 16,
     numPhysicalRegs = 64,
-    dataWidth = 32 bits,
+    dataWidth = 64 bits,
     maxNumSrcRegsPerInsn = 2,
     maxNumDstRegsPerInsn = 1,
     issueQueueSize = 16,
@@ -34,7 +34,7 @@ class MiniGen extends Component {
 
   val msem = new MachineSemantics {
     def functionUnits: Seq[FunctionUnit] = Seq(
-      new Alu(TestTag.static(0), AluConfig(alu32 = false), lowLatency = true),
+      new Alu(TestTag.static(0), AluConfig(alu32 = true), lowLatency = true),
       new Multiplier(TestTag.static(1), MultiplierConfig()),
       new Divider(TestTag.static(2))
     )
@@ -67,13 +67,14 @@ class MiniGen extends Component {
     val const = UInt(32 bits)
     val useConst = Bool()
     val opc = GenericOpcode()
+    val alu32 = Bool()
     def parentObjects: Seq[Data] = Seq(decode)
 
     override def decodeAs[T <: AnyRef](ctag: ClassTag[T]): Option[T] = {
       if (ctag == classTag[AluOperation]) {
         val op = AluOperation()
-        op.alu32 := False
-        op.const := const.asBits
+        op.alu32 := alu32
+        op.const := const.asBits.resized
         op.opcode := GenericOpcode.translateToAlu(opc)._2
         op.useConst := useConst
         Some(op.asInstanceOf[T])
