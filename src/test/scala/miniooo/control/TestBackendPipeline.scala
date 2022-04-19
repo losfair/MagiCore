@@ -40,10 +40,11 @@ class TestBackendPipeline extends AnyFunSuite {
   )
 
   val msem = new MachineSemantics {
-    def functionUnits: Seq[FunctionUnit] = Seq(
+    lazy val functionUnits: Seq[FunctionUnit] = Seq(
       new Alu(TestTag.static(0), AluConfig(alu32 = false)),
       new Multiplier(TestTag.static(1), MultiplierConfig()),
-      new Divider(TestTag.static(2))
+      new Divider(TestTag.static(2)),
+      new DummyEffect(TestTag.static(3))
     )
   }
 
@@ -88,6 +89,10 @@ class TestBackendPipeline extends AnyFunSuite {
         val op = DividerOperation()
         op.signed := opc === GenericOpcode.DIV_S || opc === GenericOpcode.REM_S
         op.useRemainder := opc === GenericOpcode.REM_S || opc === GenericOpcode.REM_U
+        Some(op.asInstanceOf[T])
+      } else if (ctag == classTag[DummyEffectOperation]) {
+        val op = DummyEffectOperation()
+        op.value := const
         Some(op.asInstanceOf[T])
       } else {
         None
@@ -135,6 +140,7 @@ class TestBackendPipeline extends AnyFunSuite {
         )
       )
       val cycles = out(UInt(64 bits))
+      val effectOutput = out(Flow(UInt(32 bits)))
     }
     io.input >> pipeline.io.input
     val prfIf = Machine.get[PrfInterface]
@@ -146,13 +152,18 @@ class TestBackendPipeline extends AnyFunSuite {
     val cycles = Reg(UInt(64 bits)) init (0)
     cycles := cycles + 1
 
+    io.effectOutput := pipeline
+      .lookupFunctionUnitInstancesByType(classOf[DummyEffectInstance])(0)
+      .effectOutput
+
     io.cycles := cycles
   }
 
   test("TestBackendPipeline") {
     SimConfig.withWave.doSim(
       rtl = Machine.build { new TestBackendPipelineTop() },
-      name = "test"
+      name = "test",
+      seed = 134481439
     ) { dut =>
       dut.io.input.valid #= false
 
@@ -191,6 +202,7 @@ class TestBackendPipeline extends AnyFunSuite {
       caseCount.update("ADD", 0)
       caseCount.update("MUL", 0)
       caseCount.update("DIV_U", 0)
+      caseCount.update("DUMMY_EFFECT", 0)
 
       val testSize = 50000
       var writebackCount = 0
@@ -206,8 +218,22 @@ class TestBackendPipeline extends AnyFunSuite {
         }
       }
 
+      // Watch effect
+      var nextDummyEffectValue = 0
+      fork {
+        while (true) {
+          dut.clockDomain.waitSampling()
+          if (dut.io.effectOutput.valid.toBoolean) {
+            val value = dut.io.effectOutput.payload.toBigInt
+            assert(value == nextDummyEffectValue)
+            nextDummyEffectValue += 1
+          }
+        }
+      }
+
       val startCycles = dut.io.cycles.toBigInt
       var delayCount = 0
+      var dummyEffectSeq = 0
 
       for (i <- 0 until testSize) {
         val thisDelay = if (Random.nextInt(50) < 2) Random.nextInt(5) else 0
@@ -259,7 +285,7 @@ class TestBackendPipeline extends AnyFunSuite {
                 )
               }
             )
-          case x if 80 until 98 contains x =>
+          case x if 80 until 97 contains x =>
             // MUL
             caseCount.update("MUL", caseCount("MUL") + 1)
             val left = Random.nextInt(mspec.numArchitecturalRegs)
@@ -280,7 +306,7 @@ class TestBackendPipeline extends AnyFunSuite {
                 )
               }
             )
-          case x if 98 until 100 contains x => {
+          case x if 97 until 99 contains x => {
             // DIV_U
             caseCount.update("DIV_U", caseCount("DIV_U") + 1)
             val left = Random.nextInt(mspec.numArchitecturalRegs)
@@ -304,6 +330,25 @@ class TestBackendPipeline extends AnyFunSuite {
                 )
               }
             )
+          }
+          case x if 99 until 100 contains x => {
+            // DUMMY_EFFECT
+            caseCount.update("DUMMY_EFFECT", caseCount("DUMMY_EFFECT") + 1)
+            dut.io.input.simWrite(
+              dut,
+              p => {
+                MockPayload.create(
+                  p,
+                  t = 3,
+                  rs1 = None,
+                  rs2 = None,
+                  const = Some(dummyEffectSeq),
+                  rd = None,
+                  opc = GenericOpcode.ADD
+                )
+              }
+            )
+            dummyEffectSeq += 1
           }
         }
       }
@@ -334,6 +379,8 @@ class TestBackendPipeline extends AnyFunSuite {
         assert(data == mirror(i), "value validation failed for reg " + i)
         println("reg " + i + ": " + data)
       }
+
+      assert(caseCount("DUMMY_EFFECT") == nextDummyEffectValue)
       println("validation ok")
     }
   }

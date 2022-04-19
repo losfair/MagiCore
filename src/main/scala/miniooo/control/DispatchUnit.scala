@@ -307,6 +307,15 @@ case class DispatchUnit[T <: PolymorphicDataChain](
       val renameIf = Machine.get[RenameInterface]
       var cmtSnapshot = renameIf.unit.cmt
 
+      val effects = sem.functionUnits
+        .map(x => (x, x.generateEffect()))
+        .filter(x => x._2.isDefined)
+        .map(x => (x._1, x._2.get))
+      effects
+        .foreach(x => {
+          x._2.io_reset := reset
+        })
+
       for (i <- 0 until spec.commitWidth) {
         val entryData = readOutput(i)
         val localEmpty =
@@ -352,6 +361,16 @@ case class DispatchUnit[T <: PolymorphicDataChain](
 
         io.writebackMonitor(i).valid := entryReady
         io.writebackMonitor(i).payload := entryData.data.commitRequest
+
+        val eff = CommitEffect()
+        eff.robIndex := entryData.addr
+
+        effects.foreach(x => {
+          x._2
+            .io_effect(i)
+            .valid := entryReady && decodeInfo.functionUnitTag === x._1.staticTag
+          x._2.io_effect(i).payload := eff
+        })
 
         // Pop the item from the queue
         when(entryReady) {

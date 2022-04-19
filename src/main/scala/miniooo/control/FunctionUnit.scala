@@ -4,16 +4,27 @@ import spinal.core._
 import spinal.lib._
 import miniooo.util.PolymorphicDataChain
 
+case class CommitEffect() extends Bundle {
+  private val spec = Machine.get[MachineSpec]
+  val robIndex = spec.robEntryIndexType()
+}
+
 trait FunctionUnit {
   def staticTag: Data
   def warnOnBlockedIssue: Boolean = false
   def inOrder: Boolean = false
   def isAlu: Boolean = false // The ALU receives special treatment for low-latency issueing.
   def generate(hardType: HardType[_ <: PolymorphicDataChain]): FunctionUnitInstance
+  def generateEffect(): Option[EffectInstance] = None
 }
 
 trait FunctionUnitInstance extends Area {
   def io_available: Bool
   def io_input: Stream[_ <: PolymorphicDataChain]
   def io_output: Stream[CommitRequest]
+}
+
+trait EffectInstance extends Area {
+  def io_effect: Vec[Flow[CommitEffect]]
+  def io_reset: Bool
 }

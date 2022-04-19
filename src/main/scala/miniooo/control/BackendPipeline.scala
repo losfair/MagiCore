@@ -4,6 +4,7 @@ import spinal.core._
 import spinal.lib._
 import miniooo.util._
 import MiniOoOExt._
+import scala.collection.mutable.ArrayBuffer
 
 case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
     extends Area {
@@ -80,12 +81,17 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
       )
   else rename.io.physSrcRegActivationMask_ino.setIdle()
 
+  private val functionUnitInstances_ = (0 until sem.functionUnits.length)
+    .map(_ => null.asInstanceOf[FunctionUnitInstance])
+    .to[ArrayBuffer]
+
   for (
     ((fu, i), j) <- sem.functionUnits.zipWithIndex
       .filter(x => !x._1.inOrder)
       .zipWithIndex
   ) {
     val unit = fu.generate(HardType(oooIssue.issueDataType))
+    functionUnitInstances_.update(i, unit)
     oooIssue.io
       .issuePorts(j)
       .asInstanceOf[Stream[PolymorphicDataChain]] >> unit.io_input
@@ -105,6 +111,7 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
         .zipWithIndex
     ) {
       val unit = fu.generate(HardType(inOrderIssue.issueDataType))
+      functionUnitInstances_.update(i, unit)
       inOrderIssue.io
         .issuePorts(j)
         .asInstanceOf[Stream[PolymorphicDataChain]] >> unit.io_input
@@ -127,4 +134,11 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
   dispatch.io.writebackMonitor
     .zip(io.writebackMonitor)
     .foreach(x => x._1 >> x._2)
+
+  val functionUnitInstances = functionUnitInstances_.toSeq
+
+  def lookupFunctionUnitInstancesByType[T <: FunctionUnitInstance](cls: Class[T]): Seq[T] =
+    functionUnitInstances
+      .filter(x => cls.isAssignableFrom(x.getClass()))
+      .map(_.asInstanceOf[T])
 }

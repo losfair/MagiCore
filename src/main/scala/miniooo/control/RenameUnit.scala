@@ -96,7 +96,8 @@ case class RenameUnit[T <: PolymorphicDataChain](
       .payload(i)
 
   for (i <- 0 until spec.numPhysicalRegs) {
-    val (inc, dec1, dec2) = (incRefcount(i), decRefcount_ooo(i), decRefcount_ino(i))
+    val (inc, dec1, dec2) =
+      (incRefcount(i), decRefcount_ooo(i), decRefcount_ino(i))
     when(inc && !dec1 && !dec2) {
       assert(srcRefcount(i) =/= srcRefcountType.maxValue, "Refcount overflow")
       srcRefcount(i) := srcRefcount(i) + 1
@@ -106,7 +107,10 @@ case class RenameUnit[T <: PolymorphicDataChain](
       srcRefcount(i) := srcRefcount(i) - 1
     }
     when(!inc && dec1 && dec2) {
-      assert(srcRefcount(i) =/= 0 && srcRefcount(i) =/= 1, "Refcount underflow (2)")
+      assert(
+        srcRefcount(i) =/= 0 && srcRefcount(i) =/= 1,
+        "Refcount underflow (2)"
+      )
       srcRefcount(i) := srcRefcount(i) - 2
     }
   }
@@ -121,25 +125,30 @@ case class RenameUnit[T <: PolymorphicDataChain](
   )
 
   var allocOk = True
-  val applyRmtUpdate = False
   ({
     var localAllowMask = rmtAllowMask
     output.physDstRegs := Vec(
       decodeInfo.archDstRegs.map(entry => {
-        val (thisAllocOk, index) = prfIf.state.findFreeReg(
-          Vec(localAllowMask.zip(zeroRefcountMask).map(x => x._1 && x._2))
-        )
-        allocOk = entry.valid.mux(
-          True -> (allocOk && thisAllocOk),
-          False -> allocOk
-        )
-        // FIXME: This is incorrect!
-        localAllowMask = localAllowMask.clone()
-        localAllowMask(index) := False
-        when(io.output.fire) {
-          prfIf.state.markAsBusyInPlace(index)
+        val allocatedIndex = spec.physRegIndexType
+        when(entry.valid) {
+          val (thisAllocOk, index) = prfIf.state.findFreeReg(
+            Vec(localAllowMask.zip(zeroRefcountMask).map(x => x._1 && x._2))
+          )
+          allocOk = entry.valid.mux(
+            True -> (allocOk && thisAllocOk),
+            False -> allocOk
+          )
+          // FIXME: This is incorrect!
+          localAllowMask = localAllowMask.clone()
+          localAllowMask(index) := False
+          when(io.output.fire) {
+            prfIf.state.markAsBusyInPlace(index)
+          }
+          allocatedIndex := index
+        } otherwise {
+          allocatedIndex := 0
         }
-        index
+        allocatedIndex
       })
     )
   })
