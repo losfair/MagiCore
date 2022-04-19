@@ -210,7 +210,11 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           data = prfItem,
           enable = shouldWrite
         )
-        prfIf.notify(enable = shouldWrite, index = dstRegPhys)
+
+        new ResetArea(reset = reset, cumulative = true) {
+          prfIf.notify_callerHandlesReset(enable = shouldWrite, index = dstRegPhys)
+        }
+
         when(shouldWrite) {
           val st = prfIf.state.table(dstRegPhys)
           assert(st.busy, "Physical register not busy")

@@ -129,7 +129,6 @@ case class PrfUnit(reset: Bool) extends Area {
         val notifyCount = Vec(
           notifiers
             .map(x => x._1 && x._2 === i)
-            .map(x => RegNext(next = x, init = False))
         )
           .countForVerification(x => x)
         assert(
@@ -168,8 +167,8 @@ case class PrfInterface(unit: PrfUnit) {
     wakeUp
   }
 
-  def notify(enable: Bool, index: UInt): Unit = {
-    unit.notifiers += ((enable, index))
+  def notify_callerHandlesReset(enable: Bool, index: UInt): Unit = {
+    unit.notifiers += ((RegNext(next = enable, init = False), RegNext(index)))
 
     /*when(enable) {
       val s: Seq[Any] =

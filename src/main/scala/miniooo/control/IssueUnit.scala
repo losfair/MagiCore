@@ -77,7 +77,9 @@ case class IssueQueue[T <: PolymorphicDataChain](
   case class IqTag() extends Bundle {
     val valid = Bool()
     val pending = Bool()
-    val priority = UInt(log2Up(spec.issueQueueSize) bits)
+
+    // 2-bit saturating counter. Using full width causes bad timing.
+    val priority = UInt(2 bits)
     val canFastWakeup = Bool()
     val dependencies = Vec(IqDependency(), spec.maxNumSrcRegsPerInsn)
     val portIndex = UInt(log2Up(c.portSpecs.size) bits)
@@ -116,7 +118,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
   val fastWakeupIndex = UInt(log2Up(spec.numPhysicalRegs) bits)
 
   // A dependency is woke up in the next cycle if:
-  // - the register will be in `dataAvailable` state the next cycle
+  // - the register changed to `dataAvailable` state this cycle
   // - the instruction is an ALU operation, this dependency comes from another
   //   ALU operation, and that ALU operation has been issued
   def listenOnPhysRegIndex(canFastWakeup: Bool, index: UInt): Bool = {
@@ -128,8 +130,6 @@ case class IssueQueue[T <: PolymorphicDataChain](
   // Wakeup logic
   for ((t, i) <- iqTagSpace.zipWithIndex) {
     for ((dep, depIndex) <- t.dependencies.zipWithIndex) {
-      val wakeUp = prf.listen(dep.physRegIndex)
-
       dep.wakeUp := dep.wakeUp | listenOnPhysRegIndex(
         canFastWakeup = t.canFastWakeup,
         index = dep.physRegIndex
@@ -178,10 +178,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
           // Initial wakeup
           out.wakeUp := prf.state
             .table(physRegIndex)
-            .dataAvailable | listenOnPhysRegIndex(
-            canFastWakeup = t.canFastWakeup,
-            index = physRegIndex
-          )
+            .dataAvailable
 
           out.physRegIndex := physRegIndex
           out
@@ -291,7 +288,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
         (prio, index, l._3 | r._3)
       })
 
-    (ok, index)
+    (ok.setCompositeName(iqTagSpace, "pop_ok"), index.setCompositeName(iqTagSpace, "pop_index"))
   }
 
   def preparePop(index: UInt) {

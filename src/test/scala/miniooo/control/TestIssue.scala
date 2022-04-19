@@ -110,7 +110,7 @@ class TestIssue extends AnyFunSuite {
       address = simRegWrite.payload.physRegIndex,
       data = prfIfWriteData
     )
-    prfIf.notify(
+    prfIf.notify_callerHandlesReset(
       enable = simRegWrite.valid && simRegWrite.payload.wake,
       index = simRegWrite.payload.physRegIndex
     )
