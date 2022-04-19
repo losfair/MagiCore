@@ -263,7 +263,7 @@ class TestBackendPipeline extends AnyFunSuite {
                 )
               }
             )
-          case x if 10 until 80 contains x =>
+          case x if 10 until 70 contains x =>
             // ADD
             caseCount.update("ADD", caseCount("ADD") + 1)
             val left = Random.nextInt(mspec.numArchitecturalRegs)
@@ -284,7 +284,7 @@ class TestBackendPipeline extends AnyFunSuite {
                 )
               }
             )
-          case x if 80 until 97 contains x =>
+          case x if 70 until 90 contains x =>
             // MUL
             caseCount.update("MUL", caseCount("MUL") + 1)
             val left = Random.nextInt(mspec.numArchitecturalRegs)
@@ -305,7 +305,7 @@ class TestBackendPipeline extends AnyFunSuite {
                 )
               }
             )
-          case x if 97 until 99 contains x => {
+          case x if 90 until 92 contains x => {
             // DIV_U
             caseCount.update("DIV_U", caseCount("DIV_U") + 1)
             val left = Random.nextInt(mspec.numArchitecturalRegs)
@@ -330,19 +330,30 @@ class TestBackendPipeline extends AnyFunSuite {
               }
             )
           }
-          case x if 99 until 100 contains x => {
+          case x if 92 until 100 contains x => {
             // DUMMY_EFFECT
             caseCount.update("DUMMY_EFFECT", caseCount("DUMMY_EFFECT") + 1)
+            val rd =
+              if (Random.nextBoolean())
+                Some(Random.nextInt(mspec.numArchitecturalRegs))
+              else None
+            val rs1 = Random.nextInt(mspec.numArchitecturalRegs)
+            if (rd.isDefined) {
+              mirror(rd.get) = mirror(rs1) + 42
+            }
             dut.io.input.simWrite(
               dut,
               p => {
                 MockPayload.create(
                   p,
                   t = 3,
-                  rs1 = None,
-                  rs2 = None,
+                  rs1 = Some(rs1),
+                  rs2 =
+                    if (Random.nextBoolean())
+                      Some(Random.nextInt(mspec.numArchitecturalRegs))
+                    else None,
+                  rd = rd,
                   const = Some(dummyEffectSeq),
-                  rd = None,
                   opc = GenericOpcode.ADD
                 )
               }

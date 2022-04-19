@@ -43,7 +43,7 @@ class DummyEffect(val staticTag: Data) extends FunctionUnit {
       val out = CommitRequest(null)
       out.token := dispatch.lookup[CommitToken]
       out.exception := MachineException.idle
-      out.regWriteValue.assignDontCare()
+      out.regWriteValue(0) := (issue.srcRegData(0).asUInt + 42).asBits
 
       io_output << io_input
         .translateWith(out)
