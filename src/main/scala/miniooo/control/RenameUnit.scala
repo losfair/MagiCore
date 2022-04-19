@@ -30,7 +30,8 @@ case class RenameUnit[T <: PolymorphicDataChain](
   val io = new Bundle {
     val input = Stream(dataType())
     val output = Stream(outType)
-    val physSrcRegActivationMask = Flow(Vec(Bool(), spec.numPhysicalRegs))
+    val physSrcRegActivationMask_ooo = Flow(Vec(Bool(), spec.numPhysicalRegs))
+    val physSrcRegActivationMask_ino = Flow(Vec(Bool(), spec.numPhysicalRegs))
   }
 
   // Rename Map Table
@@ -84,21 +85,29 @@ case class RenameUnit[T <: PolymorphicDataChain](
   val incRefcount = Vec(Bool(), spec.numPhysicalRegs)
   for (b <- incRefcount) b := False
 
-  val decRefcount = Vec(Bool(), spec.numPhysicalRegs)
-  for (b <- decRefcount) b := False
+  val decRefcount_ooo = Vec(Bool(), spec.numPhysicalRegs)
+  for ((b, i) <- decRefcount_ooo.zipWithIndex)
+    b := io.physSrcRegActivationMask_ooo.valid & io.physSrcRegActivationMask_ooo
+      .payload(i)
 
-  when(io.physSrcRegActivationMask.valid) {
-    decRefcount := io.physSrcRegActivationMask.payload
-  }
+  val decRefcount_ino = Vec(Bool(), spec.numPhysicalRegs)
+  for ((b, i) <- decRefcount_ino.zipWithIndex)
+    b := io.physSrcRegActivationMask_ino.valid & io.physSrcRegActivationMask_ino
+      .payload(i)
 
   for (i <- 0 until spec.numPhysicalRegs) {
-    when(incRefcount(i) && !decRefcount(i)) {
+    val (inc, dec1, dec2) = (incRefcount(i), decRefcount_ooo(i), decRefcount_ino(i))
+    when(inc && !dec1 && !dec2) {
       assert(srcRefcount(i) =/= srcRefcountType.maxValue, "Refcount overflow")
       srcRefcount(i) := srcRefcount(i) + 1
     }
-    when(decRefcount(i) && !incRefcount(i)) {
-      assert(srcRefcount(i) =/= 0, "Refcount underflow")
+    when((inc && dec1 && dec2) || (!inc && (dec1 ^ dec2))) {
+      assert(srcRefcount(i) =/= 0, "Refcount underflow (1)")
       srcRefcount(i) := srcRefcount(i) - 1
+    }
+    when(!inc && dec1 && dec2) {
+      assert(srcRefcount(i) =/= 0 && srcRefcount(i) =/= 1, "Refcount underflow (2)")
+      srcRefcount(i) := srcRefcount(i) - 2
     }
   }
 

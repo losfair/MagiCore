@@ -23,42 +23,98 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
   reset := dispatch.reset
   val exception = dispatch.exception
 
-  val issue = IssueUnit(
+  val oooIssue = IssueUnit(
     c = IssueConfig(portSpecs =
-      sem.functionUnits.map(u =>
-        IssueSpec(
-          staticTag = u.staticTag,
-          warnOnBlockedIssue = u.warnOnBlockedIssue,
-          fastWakeup = u.isAlu
+      sem.functionUnits
+        .filter(x => !x.inOrder)
+        .map(u =>
+          IssueSpec(
+            staticTag = u.staticTag,
+            warnOnBlockedIssue = u.warnOnBlockedIssue,
+            fastWakeup = u.isAlu
+          )
         )
-      )
     ),
     dataType = HardType(dispatch.outType),
     reset = reset
   )
 
+  val inOrderIssue =
+    if (sem.functionUnits.exists(x => x.inOrder))
+      InOrderIssueUnit(
+        c = IssueConfig(portSpecs =
+          sem.functionUnits
+            .filter(x => x.inOrder)
+            .map(u =>
+              IssueSpec(
+                staticTag = u.staticTag,
+                warnOnBlockedIssue = u.warnOnBlockedIssue,
+                fastWakeup = u.isAlu
+              )
+            )
+        ),
+        dataType = HardType(dispatch.outType),
+        reset = reset
+      )
+    else null
+
   rename.io.output >> dispatch.io.input
 
   new ResetArea(reset = reset, cumulative = true) {
-    dispatch.io.output >/-> issue.io.input
+    dispatch.io.oooOutput >/-> oooIssue.io.input
+    if (inOrderIssue != null)
+      dispatch.io.inOrderOutput >/-> inOrderIssue.io.input
+    else
+      dispatch.io.inOrderOutput.setBlocked()
   }
 
-  issue.io.issueMonitor.translateWith(
-    issue.io.issueMonitor.payload.toPhysSrcRegActivationMask()
-  ) >> rename.io.physSrcRegActivationMask
-  for ((fu, i) <- sem.functionUnits.zipWithIndex) {
-    val unit = fu.generate(HardType(issue.issueDataType))
-    issue.io
-      .issuePorts(i)
+  rename.io.physSrcRegActivationMask_ooo << oooIssue.io.issueMonitor
+    .translateWith(
+      oooIssue.io.issueMonitor.payload.toPhysSrcRegActivationMask()
+    )
+
+  if (inOrderIssue != null)
+    rename.io.physSrcRegActivationMask_ino << inOrderIssue.io.issueMonitor
+      .translateWith(
+        inOrderIssue.io.issueMonitor.payload.toPhysSrcRegActivationMask()
+      )
+  else rename.io.physSrcRegActivationMask_ino.setIdle()
+
+  for (
+    ((fu, i), j) <- sem.functionUnits.zipWithIndex
+      .filter(x => !x._1.inOrder)
+      .zipWithIndex
+  ) {
+    val unit = fu.generate(HardType(oooIssue.issueDataType))
+    oooIssue.io
+      .issuePorts(j)
       .asInstanceOf[Stream[PolymorphicDataChain]] >> unit.io_input
-      .setCompositeName(this, "function_unit_input_" + i)
+      .setCompositeName(this, "ooo_function_unit_input_" + i)
       .asInstanceOf[Stream[PolymorphicDataChain]]
     unit.io_output.setCompositeName(
       this,
-      "function_unit_output_" + i
+      "ooo_function_unit_output_" + i
     ) >> dispatch.io.commit(i)
-    issue.io.issueAvailable(i) := unit.io_available
+    oooIssue.io.issueAvailable(j) := unit.io_available
   }
+
+  if (inOrderIssue != null)
+    for (
+      ((fu, i), j) <- sem.functionUnits.zipWithIndex
+        .filter(x => x._1.inOrder)
+        .zipWithIndex
+    ) {
+      val unit = fu.generate(HardType(inOrderIssue.issueDataType))
+      inOrderIssue.io
+        .issuePorts(j)
+        .asInstanceOf[Stream[PolymorphicDataChain]] >> unit.io_input
+        .setCompositeName(this, "ino_function_unit_input_" + i)
+        .asInstanceOf[Stream[PolymorphicDataChain]]
+      unit.io_output.setCompositeName(
+        this,
+        "ino_function_unit_output_" + i
+      ) >> dispatch.io.commit(i)
+    }
 
   val io = new Bundle {
     val input = Stream(inputType)

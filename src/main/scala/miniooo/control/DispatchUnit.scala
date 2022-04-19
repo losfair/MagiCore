@@ -68,7 +68,8 @@ case class DispatchUnit[T <: PolymorphicDataChain](
 
   val io = new Bundle {
     val input = Stream(dataType())
-    val output = Stream(outType)
+    val oooOutput = Stream(outType)
+    val inOrderOutput = Stream(outType)
     val commit = Vec(Stream(commitRequestType), sem.numFunctionUnits)
     val writebackMonitor = Vec(Flow(CommitRequest(dataType)), spec.commitWidth)
   }
@@ -116,7 +117,27 @@ case class DispatchUnit[T <: PolymorphicDataChain](
       output.parentObjects(0) := io.input.payload
       output.robIndex := pushPtr
       output.epoch := currentEpoch
-      io.output << io.input.translateWith(output).continueWhen(!full)
+
+      val outputStream = io.input.translateWith(output).continueWhen(!full)
+
+      val decodeInfo = io.input.payload.lookup[DecodeInfo]
+
+      val inOrder = False
+      for (fu <- sem.functionUnits) {
+        if (fu.inOrder) {
+          when(fu.staticTag === decodeInfo.functionUnitTag) {
+            inOrder := True
+          }
+        }
+      }
+
+      when(inOrder) {
+        io.inOrderOutput << outputStream
+        io.oooOutput.setIdle()
+      } otherwise {
+        io.inOrderOutput.setIdle()
+        io.oooOutput << outputStream
+      }
 
       val assignedBankIndex = getBankIndexForPtr(pushPtr)
       val newEntry = robEntryType
@@ -212,7 +233,10 @@ case class DispatchUnit[T <: PolymorphicDataChain](
         )
 
         new ResetArea(reset = reset, cumulative = true) {
-          prfIf.notify_callerHandlesReset(enable = shouldWrite, index = dstRegPhys)
+          prfIf.notify_callerHandlesReset(
+            enable = shouldWrite,
+            index = dstRegPhys
+          )
         }
 
         when(shouldWrite) {

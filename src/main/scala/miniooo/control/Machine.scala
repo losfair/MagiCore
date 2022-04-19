@@ -11,6 +11,7 @@ case class MachineSpec(
     maxNumSrcRegsPerInsn: Int,
     maxNumDstRegsPerInsn: Int,
     issueQueueSize: Int,
+    inOrderIssueQueueSize: Int = 16,
     functionUnitTagType: HardType[_ <: Data],
     robSize: Int,
     commitWidth: Int

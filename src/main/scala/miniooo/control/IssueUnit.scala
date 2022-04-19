@@ -316,7 +316,7 @@ case class IssueUnit[T <: PolymorphicDataChain](
     val data = dataType()
   }
 
-  val issueDataType = IssuePort(dataType)
+  def issueDataType = IssuePort(dataType)
 
   val io = new Bundle {
     val input = Stream(dataType())
