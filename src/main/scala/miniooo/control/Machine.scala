@@ -80,3 +80,21 @@ class Machine {
 }
 
 object MachineDebugMarker {}
+
+case class MachineException() extends Bundle {
+  val valid = Bool()
+  val code = MachineExceptionCode()
+}
+
+object MachineException {
+  def idle: MachineException = {
+    val e = MachineException()
+    e.valid := False
+    e.code.assignDontCare()
+    e
+  }
+}
+
+object MachineExceptionCode extends SpinalEnum(binarySequential) {
+  val BRANCH_MISS, DIVIDE_ERROR = newElement()
+}

@@ -48,7 +48,7 @@ case class Multiplier(staticTag: Data, c: MultiplierConfig) extends FunctionUnit
       val stage1 = stream.translateWith(stage1Payload).stage()
 
       out.token := stage1.payload.token
-      out.exception := False
+      out.exception := MachineException.idle
       out.regWriteValue(0) := stage1.payload.value
       io_output << stage1.translateWith(out)
     }

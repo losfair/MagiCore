@@ -40,7 +40,7 @@ case class CommitRequest(hardType: HardType[_ <: PolymorphicDataChain])
   val regWriteValue = Vec(
     (0 until spec.maxNumDstRegsPerInsn).map(_ => spec.dataType)
   )
-  val exception = Bool()
+  val exception = MachineException()
   val parentObjects = if (hardType != null) Seq(hardType()) else Seq()
 }
 
@@ -51,8 +51,7 @@ case class RobEntry(hardType: HardType[_ <: PolymorphicDataChain])
 }
 
 case class DispatchUnit[T <: PolymorphicDataChain](
-    dataType: HardType[T],
-    reset: Bool
+    dataType: HardType[T]
 ) extends Area {
 
   private val spec = Machine.get[MachineSpec]
@@ -75,6 +74,10 @@ case class DispatchUnit[T <: PolymorphicDataChain](
   }
 
   val currentEpoch = Reg(spec.epochType()) init (0)
+  val exception = Reg(MachineException()) init (MachineException.idle)
+  exception.valid := False
+
+  val reset = exception.valid
 
   val rob = new Area {
 
@@ -282,6 +285,13 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           entryData.addr === pushPtr && (!risingOccupancy || Bool(i != 0))
         entryReady = entryReady && !localEmpty && entryData.data.completed
 
+        when(entryReady && entryData.data.commitRequest.exception.valid) {
+          exception := entryData.data.commitRequest.exception
+          currentEpoch := currentEpoch + 1
+        }
+
+        entryReady = entryReady && !entryData.data.commitRequest.exception.valid
+
         val renameInfo = entryData.data.commitRequest.lookup[RenameInfo]
         val decodeInfo = entryData.data.commitRequest.lookup[DecodeInfo]
 
@@ -325,7 +335,11 @@ case class DispatchUnit[T <: PolymorphicDataChain](
               "writeback rob entry cyc=",
               debugCyc,
               " at ",
-              entryData.addr
+              entryData.addr,
+              " exc.valid ",
+              entryData.data.commitRequest.exception.valid,
+              " exc.code ",
+              entryData.data.commitRequest.exception.code
             ) ++ renameInfo.physDstRegs
               .zip(
                 decodeInfo.archDstRegs

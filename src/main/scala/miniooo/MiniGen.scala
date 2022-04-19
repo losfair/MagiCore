@@ -36,7 +36,7 @@ class MiniGen extends Component {
     def functionUnits: Seq[FunctionUnit] = Seq(
       new Alu(TestTag.static(0), AluConfig(alu32 = true)),
       new Multiplier(TestTag.static(1), MultiplierConfig()),
-      new Divider(TestTag.static(2))
+      new Divider(TestTag.static(2), enableException = true)
     )
   }
 

@@ -11,7 +11,6 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
   private val sem = Machine.get[MachineSemantics]
 
   val reset = Bool()
-  reset := False
 
   val prf = PrfUnit(reset = reset)
   Machine.provide(prf.interface)
@@ -19,7 +18,11 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
   val rename = RenameUnit(dataType = inputType, reset = reset)
   Machine.provide(RenameInterface(rename))
 
-  val dispatch = DispatchUnit(dataType = HardType(rename.outType), reset = reset)
+  val dispatch =
+    DispatchUnit(dataType = HardType(rename.outType))
+  reset := dispatch.reset
+  val exception = dispatch.exception
+
   val issue = IssueUnit(
     c = IssueConfig(portSpecs =
       sem.functionUnits.map(u =>
@@ -35,7 +38,11 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
   )
 
   rename.io.output >> dispatch.io.input
-  dispatch.io.output >/-> issue.io.input
+
+  new ResetArea(reset = reset, cumulative = true) {
+    dispatch.io.output >/-> issue.io.input
+  }
+
   issue.io.issueMonitor.translateWith(
     issue.io.issueMonitor.payload.toPhysSrcRegActivationMask()
   ) >> rename.io.physSrcRegActivationMask

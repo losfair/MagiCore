@@ -112,8 +112,10 @@ case class PrfUnit(reset: Bool) extends Area {
 
     // Verification
     {
-      val dataWasAvailable =
-        Vec(Reg(Bool()) init (True), Machine.get[MachineSpec].numPhysicalRegs)
+      val dataWasAvailable = new ResetArea(reset = reset, cumulative = true) {
+        val v =
+          Vec(Reg(Bool()) init (True), Machine.get[MachineSpec].numPhysicalRegs)
+      }.v
       for (
         (src, dst) <- state.table.map(_.dataAvailable).zip(dataWasAvailable)
       ) {

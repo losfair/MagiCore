@@ -13,7 +13,8 @@ case class DividerOperation() extends Bundle with PolymorphicDataChain {
   val signed = Bool()
 }
 
-final case class Divider(staticTag: Data) extends FunctionUnit {
+final case class Divider(staticTag: Data, enableException: Boolean = false)
+    extends FunctionUnit {
   override def warnOnBlockedIssue = true
   override def generate(
       hardType: HardType[_ <: PolymorphicDataChain]
@@ -38,9 +39,12 @@ final case class Divider(staticTag: Data) extends FunctionUnit {
 
       val buffered_input = io_input.s2mPipe()
 
-      val buffered_count = Reg(UInt(3 bits)) init(0)
+      val buffered_count = Reg(UInt(3 bits)) init (0)
       when(io_input.fire && !io_output.fire) {
-        assert(buffered_count =/= buffered_count.maxValue, "buffered_count overflow")
+        assert(
+          buffered_count =/= buffered_count.maxValue,
+          "buffered_count overflow"
+        )
         buffered_count := buffered_count + 1
       }
       when(!io_input.fire && io_output.fire) {
@@ -64,17 +68,51 @@ final case class Divider(staticTag: Data) extends FunctionUnit {
 
               val newRt = RtCtx()
               newRt.op := buffered_input.payload.lookup[DividerOperation]
-              newRt.aNeg := issue.srcRegData(0)(31)
-              newRt.bNeg := issue.srcRegData(1)(31)
+              newRt.aNeg := issue.srcRegData(0)(spec.dataWidth.value - 1)
+              newRt.bNeg := issue.srcRegData(1)(spec.dataWidth.value - 1)
               newRt.dividend := issue.srcRegData(0)
               newRt.divisor := issue.srcRegData(1)
               newRt.quotient := 0
               newRt.remainder := 0
               newRt.counter := 0
               newRt.token := dispatchInfo.lookup[CommitToken]
-              Machine.report(Seq("begin division: ", issue.srcRegData(0), " ", issue.srcRegData(1)))
               rt := newRt
-              goto(work)
+
+              val hasExc = Bool()
+
+              if (enableException) {
+                val signedOverflow =
+                  newRt.op.signed && newRt.dividend === (BigInt(
+                    1
+                  ) << (spec.dataWidth.value - 1)) && newRt.divisor === 1
+                val divideByZero = newRt.divisor === 0
+                hasExc := signedOverflow || divideByZero
+                when(hasExc) {
+                  Machine.report(
+                    Seq(
+                      "division error: signedOverflow=",
+                      signedOverflow,
+                      " divideByZero=",
+                      divideByZero
+                    )
+                  )
+                  goto(divError)
+                }
+              } else {
+                hasExc := False
+              }
+
+              when(!hasExc) {
+                Machine.report(
+                  Seq(
+                    "begin division: ",
+                    issue.srcRegData(0),
+                    " ",
+                    issue.srcRegData(1)
+                  )
+                )
+                goto(work)
+              }
             }
           }
         }
@@ -122,7 +160,7 @@ final case class Divider(staticTag: Data) extends FunctionUnit {
               .resize(spec.dataWidth)
             io_output.valid := True
             io_output.payload.token := rt.token
-            io_output.payload.exception := False
+            io_output.payload.exception := MachineException.idle
             io_output.payload.regWriteValue(0) := out
             when(io_output.ready) {
               Machine.report(Seq("end division: ", out))
@@ -130,6 +168,19 @@ final case class Divider(staticTag: Data) extends FunctionUnit {
             }
           }
         }
+        val divError: State = if (enableException) new State {
+          whenIsActive {
+            io_output.valid := True
+            io_output.payload.token := rt.token
+            io_output.payload.exception.valid := True
+            io_output.payload.exception.code := MachineExceptionCode.DIVIDE_ERROR
+            when(io_output.ready) {
+              Machine.report(Seq("end division error"))
+              goto(init)
+            }
+          }
+        }
+        else null
       }
 
     }
