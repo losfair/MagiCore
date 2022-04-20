@@ -16,6 +16,7 @@ class TestIssue extends AnyFunSuite {
   val mspec = MachineSpec(
     numArchitecturalRegs = 4,
     numPhysicalRegs = 64,
+    addrWidth = 32 bits,
     dataWidth = 32 bits,
     maxNumSrcRegsPerInsn = 2,
     maxNumDstRegsPerInsn = 1,

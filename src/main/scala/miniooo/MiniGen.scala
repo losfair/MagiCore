@@ -24,6 +24,7 @@ class MiniGen extends Component {
   val mspec = MachineSpec(
     numArchitecturalRegs = 32,
     numPhysicalRegs = 64,
+    addrWidth = 32 bits,
     dataWidth = 64 bits,
     maxNumSrcRegsPerInsn = 2,
     maxNumDstRegsPerInsn = 1,

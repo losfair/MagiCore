@@ -7,6 +7,7 @@ import scala.reflect._
 case class MachineSpec(
     numArchitecturalRegs: Int,
     numPhysicalRegs: Int,
+    addrWidth: BitCount,
     dataWidth: BitCount,
     maxNumSrcRegsPerInsn: Int,
     maxNumDstRegsPerInsn: Int,
