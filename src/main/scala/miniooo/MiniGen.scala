@@ -6,6 +6,7 @@ import miniooo.control._
 import miniooo.lib.funit._
 import miniooo.util._
 import scala.reflect._
+import spinal.lib.bus.amba4.axi._
 
 class MiniGen extends Component {
   object TestTag {
@@ -33,15 +34,17 @@ class MiniGen extends Component {
   )
 
   val msem = new MachineSemantics {
-    def functionUnits: Seq[FunctionUnit] = Seq(
+    lazy val functionUnits: Seq[FunctionUnit] = Seq(
       new Alu(TestTag.static(0), AluConfig(alu32 = true)),
       new Multiplier(TestTag.static(1), MultiplierConfig()),
-      new Divider(TestTag.static(2), enableException = true)
+      new Divider(TestTag.static(2), enableException = true),
+      new Lsu(TestTag.static(3), LsuConfig())
     )
   }
 
   object GenericOpcode extends SpinalEnum(binarySequential) {
-    val ADD, SUB, AND, OR, XOR, MOV, DIV_S, DIV_U, REM_S, REM_U = newElement()
+    val ADD, SUB, AND, OR, XOR, MOV, DIV_S, DIV_U, REM_S, REM_U, LD, ST =
+      newElement()
 
     def translateToAlu(
         that: SpinalEnumCraft[GenericOpcode.type]
@@ -83,6 +86,11 @@ class MiniGen extends Component {
         op.signed := opc === GenericOpcode.DIV_S || opc === GenericOpcode.REM_S
         op.useRemainder := opc === GenericOpcode.REM_S || opc === GenericOpcode.REM_U
         Some(op.asInstanceOf[T])
+      } else if (ctag == classTag[LsuOperation]) {
+        val op = LsuOperation()
+        op.isStore := opc === GenericOpcode.ST
+        op.offset := const.asSInt
+        Some(op.asInstanceOf[T])
       } else {
         None
       }
@@ -92,24 +100,24 @@ class MiniGen extends Component {
   Machine.provide(mspec)
   Machine.provide(msem)
   val pipeline = BackendPipeline(MockPayload())
+  val lsu =
+    pipeline.lookupFunctionUnitInstancesByType(classOf[LsuInstance]).head
   val io = new Bundle {
     val input = slave(Stream(MockPayload()))
-
-    val regReadAddr = in(Machine.get[MachineSpec].archRegIndexType)
-    val regReadData = out(Machine.get[MachineSpec].dataType)
     val writebackMonitor = out(
       Vec(
         pipeline.io.writebackMonitor.dataType(),
         pipeline.io.writebackMonitor.size
       )
     )
+    val memBus = master(Axi4(lsu.io_axiMaster.config))
   }
   io.input >> pipeline.io.input
   val prfIf = Machine.get[PrfInterface]
-  io.regReadData := prfIf.readAsync(pipeline.rename.cmt(io.regReadAddr)).data
   pipeline.io.writebackMonitor
     .zip(io.writebackMonitor)
     .foreach(x => x._1 >> x._2)
+  lsu.io_axiMaster >> io.memBus
 }
 
 object MiniGenVerilogSyncReset {
