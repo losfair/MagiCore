@@ -432,7 +432,7 @@ case class IssueUnit[T <: PolymorphicDataChain](
       } catch {
         case _: Exception => {}
       }
-      Machine.report(iq.report())
+      //Machine.report(iq.report())
     }
 
     io.issueMonitor << unifiedIssuePort.asFlow.throwWhen(

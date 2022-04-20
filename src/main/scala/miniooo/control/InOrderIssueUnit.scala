@@ -83,4 +83,18 @@ case class InOrderIssueUnit[T <: PolymorphicDataChain](
   io.issueMonitor << popStream.asFlow.throwWhen(
     !popStream.ready
   )
+
+  when(popStream.fire) {
+    Machine.report(
+      Seq(
+        "ioiq issue - rob index ",
+        dispatchInfo.robIndex,
+        " deps"
+      ) ++ decodeInfo.archSrcRegs
+        .zip(renameInfo.physSrcRegs)
+        .flatMap({ case (arch, phys) =>
+          Seq("[v=", arch.valid, " arch=", arch.index, " phys=", phys, "]")
+        })
+    )
+  }
 }

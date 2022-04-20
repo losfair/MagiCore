@@ -44,7 +44,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
     useSize = false,
     useQos = false,
     useLen = false,
-    useLast = false,
+    useLast = true,
     useResp = true,
     useProt = false,
     useStrb = true
@@ -181,6 +181,50 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         allocOk := firstReplace._1 || firstEmpty._1
       }
 
+      // This logic block may invalidate a `storeBuffer` entry. So, this logic needs to be 
+      // before the `pipelineLogic` block which may write to (update) the same entry.
+      val writeAckLogic = new Area {
+        axiM.b.ready := True
+        when(axiM.b.valid) {
+          val robIndex =
+            axiM.b.payload.id.resize(spec.robEntryIndexWidth)
+          assert(pendingStoreValid_posted(robIndex), "invalid store ack")
+          pendingStoreValid_posted(robIndex) := False
+
+          val storeBufferIndex =
+            storeBuffer.zipWithIndex.firstWhere(
+              hardType = storeBufferAllocLogic.indexType(),
+              predicate = x => x._1.valid && x._1.srcRobIndex === robIndex,
+              generate =
+                x => U(x._2, storeBufferAllocLogic.indexType().getWidth bits)
+            )
+
+          Machine.report(
+            Seq(
+              "store effect ack: robIndex=",
+              robIndex,
+              " evictBuffer=",
+              storeBufferIndex._1
+            )
+          )
+
+          // The store buffer entry may have been overwritten by a newer store - so check here
+          when(storeBufferIndex._1) {
+            assert(
+              storeBuffer(storeBufferIndex._2).valid,
+              "invalid store buffer index in effect stage"
+            )
+            assert(
+              storeBuffer(storeBufferIndex._2).addr === pendingStores(
+                robIndex
+              ).addr,
+              "store address mismatch"
+            )
+            storeBuffer(storeBufferIndex._2).valid := False
+          }
+        }
+      }
+
       val firstStageLogic = new Area {
         val in = io_input.payload
         val op = in.lookup[LsuOperation]
@@ -256,6 +300,14 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
                 req.payload.token.robIndex
               ) := True
               shouldWritePendingStore := True
+              Machine.report(
+                Seq(
+                  "store scheduled - addr=",
+                  req.payload.addr.asUInt,
+                  " data=",
+                  req.payload.data
+                )
+              )
             }
           } otherwise {
             // LOAD path
@@ -283,9 +335,20 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
             outStream_pipeline.valid := ok
             outStream_pipeline.payload := commitReq
 
+            // TODO: Block the pipeline on strb mismatch
             when(ok) {
               // Store buffer bypass ok
               req.ready := outStream_pipeline.ready
+              when(req.ready) {
+                Machine.report(
+                  Seq(
+                    "load bypass ok - addr=",
+                    req.payload.addr.asUInt,
+                    " data=",
+                    store.data
+                  )
+                )
+              }
             } otherwise {
               // OoO memory read issue
               val ar = Axi4Ar(axiConfig)
@@ -294,6 +357,16 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               axiM.ar.valid := True
               axiM.ar.payload := ar
               req.ready := axiM.ar.ready
+              when(req.ready) {
+                Machine.report(
+                  Seq(
+                    "issueing ooo load at addr ",
+                    req.payload.addr.asUInt,
+                    " found=",
+                    found
+                  )
+                )
+              }
             }
           }
         } otherwise {
@@ -314,7 +387,8 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         val robIndex = effFifo.io.pop.payload.robIndex
         val isStore = resetArea.pendingStoreValid_scheduled(robIndex)
         val store = pendingStores(robIndex)
-        val (popToAw, popToW) = StreamFork2(effFifo.io.pop.throwWhen(!isStore))
+        val popStream = effFifo.io.pop.throwWhen(!isStore)
+        val (popToAw, popToW) = StreamFork2(popStream)
 
         val aw = Axi4Aw(axiConfig)
         aw.id := robIndex.resized
@@ -324,12 +398,13 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         val w = Axi4W(axiConfig)
         w.data := store.data
         w.strb := store.strb
+        w.last := True
         axiM.w << popToW.translateWith(w)
 
-        when(effFifo.io.pop.fire) {
+        when(popStream.fire) {
           resetArea.pendingStoreValid_scheduled(robIndex) := False
           pendingStoreValid_posted(robIndex) := True
-          report(
+          Machine.report(
             Seq(
               "store effect fire: robIndex=",
               robIndex,
@@ -339,48 +414,6 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               store.data
             )
           )
-        }
-      }
-
-      val writeAckLogic = new Area {
-        axiM.b.ready := True
-        when(axiM.b.valid) {
-          val robIndex =
-            axiM.b.payload.id.resize(spec.robEntryIndexWidth)
-          assert(pendingStoreValid_posted(robIndex), "invalid store ack")
-          pendingStoreValid_posted(robIndex) := False
-
-          val storeBufferIndex =
-            storeBuffer.zipWithIndex.firstWhere(
-              hardType = storeBufferAllocLogic.indexType(),
-              predicate = x => x._1.valid && x._1.srcRobIndex === robIndex,
-              generate =
-                x => U(x._2, storeBufferAllocLogic.indexType().getWidth bits)
-            )
-
-          report(
-            Seq(
-              "store effect ack: robIndex=",
-              robIndex,
-              " evictBuffer=",
-              storeBufferIndex._1
-            )
-          )
-
-          // The store buffer entry may have been overwritten by a newer store - so check here
-          when(storeBufferIndex._1) {
-            assert(
-              storeBuffer(storeBufferIndex._2).valid,
-              "invalid store buffer index in effect stage"
-            )
-            assert(
-              storeBuffer(storeBufferIndex._2).addr === pendingStores(
-                robIndex
-              ).addr,
-              "store address mismatch"
-            )
-            storeBuffer(storeBufferIndex._2).valid := False
-          }
         }
       }
 
@@ -395,6 +428,14 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         )
         commitReq.regWriteValue(0) := axiM.r.payload.data
         axiM.r.translateWith(commitReq) >> outStream_oooRead
+        when(outStream_oooRead.fire) {
+          Machine.report(
+            Seq(
+              "load ooo ok - data: ",
+              outStream_oooRead.payload.regWriteValue(0)
+            )
+          )
+        }
       }
 
       // Clear un-posted pending stores in the store buffer.
