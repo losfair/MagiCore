@@ -13,7 +13,8 @@ import miniooo.testutil.TestExt._
 import scala.collection.mutable
 import miniooo.lib.funit._
 import scala.reflect._
-import spinal.lib.bus.amba4.axi.Axi4
+import spinal.lib.bus.amba4.axi._
+import spinal.lib.bus.misc.SizeMapping
 
 class TestBackendPipeline extends AnyFunSuite {
   object TestTag {
@@ -27,6 +28,8 @@ class TestBackendPipeline extends AnyFunSuite {
   case class TestTag() extends Bundle {
     val tag = UInt(4 bits)
   }
+
+  val ocmSize = 4096
 
   val mspec = MachineSpec(
     numArchitecturalRegs = 8,
@@ -138,6 +141,12 @@ class TestBackendPipeline extends AnyFunSuite {
     val pipeline = BackendPipeline(MockPayload())
     val lsu =
       pipeline.lookupFunctionUnitInstancesByType(classOf[LsuInstance]).head
+    val ocram = new Axi4SharedOnChipRam(
+      dataWidth = lsu.io_axiMaster.config.dataWidth,
+      byteCount = ocmSize,
+      idWidth = lsu.io_axiMaster.config.idWidth + 1
+    )
+
     val io = new Bundle {
       val input = slave(Stream(MockPayload()))
 
@@ -151,9 +160,8 @@ class TestBackendPipeline extends AnyFunSuite {
       )
       val cycles = out(UInt(64 bits))
       val effectOutput = out(Flow(UInt(32 bits)))
-      val memBus = master(Axi4(lsu.io_axiMaster.config))
+      val memBus = slave(Axi4Shared(lsu.io_axiMaster.config))
     }
-    lsu.io_axiMaster >> io.memBus
     io.input >> pipeline.io.input
     val prfIf = Machine.get[PrfInterface]
     io.regReadData := prfIf.readAsync(pipeline.rename.cmt(io.regReadAddr)).data
@@ -169,17 +177,24 @@ class TestBackendPipeline extends AnyFunSuite {
       .effectOutput
 
     io.cycles := cycles
+
+    Axi4CrossbarFactory()
+      .addSlave(ocram.io.axi, SizeMapping(0, ocmSize))
+      .addConnections(
+        lsu.io_axiMaster -> Seq(ocram.io.axi),
+        io.memBus -> Seq(ocram.io.axi)
+      )
+      .build()
   }
 
   test("TestBackendPipeline") {
     SimConfig.withWave.doSim(
       rtl = Machine.build { new TestBackendPipelineTop() },
       name = "test",
-      seed = 1496989342
+      seed = 897007899
     ) { dut =>
       dut.io.input.valid #= false
-      dut.io.memBus.aw.ready #= false
-      dut.io.memBus.ar.ready #= false
+      dut.io.memBus.arw.ready #= false
       dut.io.memBus.w.ready #= false
       dut.io.memBus.b.valid #= false
       dut.io.memBus.r.valid #= false
@@ -187,6 +202,57 @@ class TestBackendPipeline extends AnyFunSuite {
       dut.clockDomain.forkStimulus(100)
       waitUntil(dut.clockDomain.isResetAsserted)
       waitUntil(dut.clockDomain.isResetDeasserted)
+
+      val memMirror = (0 until ocmSize / (mspec.dataWidth.value / 8))
+        .map(_ => BigInt(Random.nextInt(1000000000)))
+        .to[ArrayBuffer]
+
+      // Init memory
+      for (i <- 0 until ocmSize / (mspec.dataWidth.value / 8)) {
+        val wordOffset = i * (mspec.dataWidth.value / 8)
+        dut.io.input.simWrite(
+          dut,
+          p => {
+            MockPayload.create(
+              p,
+              t = 0,
+              rs1 = None,
+              rs2 = None,
+              const = Some(wordOffset),
+              rd = Some(0),
+              opc = GenericOpcode.MOV
+            )
+          }
+        )
+        dut.io.input.simWrite(
+          dut,
+          p => {
+            MockPayload.create(
+              p,
+              t = 0,
+              rs1 = None,
+              rs2 = None,
+              const = Some(memMirror(i)),
+              rd = Some(1),
+              opc = GenericOpcode.MOV
+            )
+          }
+        )
+        dut.io.input.simWrite(
+          dut,
+          p => {
+            MockPayload.create(
+              p,
+              t = 4,
+              rs1 = Some(0),
+              rs2 = Some(1),
+              const = Some(0),
+              rd = None,
+              opc = GenericOpcode.ST
+            )
+          }
+        )
+      }
 
       val mirror =
         (0 until mspec.numArchitecturalRegs)
@@ -213,6 +279,7 @@ class TestBackendPipeline extends AnyFunSuite {
       }
 
       dut.clockDomain.waitSampling(100) // wait for preparation
+      println("preparation done")
 
       val caseCount: mutable.Map[String, Int] = mutable.Map()
       caseCount.update("LD_CONST", 0)
@@ -220,9 +287,12 @@ class TestBackendPipeline extends AnyFunSuite {
       caseCount.update("MUL", 0)
       caseCount.update("DIV_U", 0)
       caseCount.update("DUMMY_EFFECT", 0)
+      caseCount.update("LD", 0)
+      caseCount.update("ST", 0)
 
       val testSize = 50000
       var writebackCount = 0
+      var expectedExtraWritebackCount = 0
 
       fork {
         while (true) {
@@ -248,9 +318,12 @@ class TestBackendPipeline extends AnyFunSuite {
         }
       }
 
+      val wordMask = ocmSize - ((1 << log2Up(mspec.dataWidth.value / 8)))
+
       val startCycles = dut.io.cycles.toBigInt
       var delayCount = 0
       var dummyEffectSeq = 0
+      val printInsn = false
 
       for (i <- 0 until testSize) {
         val thisDelay = if (Random.nextInt(50) < 2) Random.nextInt(5) else 0
@@ -258,14 +331,14 @@ class TestBackendPipeline extends AnyFunSuite {
           delayCount += thisDelay
           dut.clockDomain.waitSampling(thisDelay)
         }
-        val op = Random.nextInt(100)
+        val op = Random.nextInt(120)
         op match {
           case x if 0 until 10 contains x =>
             // LD_CONST
             caseCount.update("LD_CONST", caseCount("LD_CONST") + 1)
             val dst = Random.nextInt(mspec.numArchitecturalRegs)
             val value = Random.nextInt(100000)
-            // println("ld_const " + value + " -> r" + dst)
+            if(printInsn) println("ld_const " + value + " -> r" + dst)
             mirror.update(dst, value)
             dut.io.input.simWrite(
               dut,
@@ -287,7 +360,7 @@ class TestBackendPipeline extends AnyFunSuite {
             val left = Random.nextInt(mspec.numArchitecturalRegs)
             val right = Random.nextInt(mspec.numArchitecturalRegs)
             val dst = Random.nextInt(mspec.numArchitecturalRegs)
-            // println("add r" + left + " r" + right + " -> r" + dst)
+            if(printInsn) println("add r" + left + " r" + right + " -> r" + dst)
             mirror.update(dst, (mirror(left) + mirror(right)) & 0xffffffffL)
             dut.io.input.simWrite(
               dut,
@@ -308,7 +381,7 @@ class TestBackendPipeline extends AnyFunSuite {
             val left = Random.nextInt(mspec.numArchitecturalRegs)
             val right = Random.nextInt(mspec.numArchitecturalRegs)
             val dst = Random.nextInt(mspec.numArchitecturalRegs)
-            // println("mul r" + left + " r" + right + " -> r" + dst)
+            if(printInsn) println("mul r" + left + " r" + right + " -> r" + dst)
             mirror.update(dst, (mirror(left) * mirror(right)) & 0xffffffffL)
             dut.io.input.simWrite(
               dut,
@@ -329,6 +402,7 @@ class TestBackendPipeline extends AnyFunSuite {
             val left = Random.nextInt(mspec.numArchitecturalRegs)
             val right = Random.nextInt(mspec.numArchitecturalRegs)
             val dst = Random.nextInt(mspec.numArchitecturalRegs)
+            if(printInsn) println("div_u r" + left + " r" + right + " -> r" + dst)
             if (mirror(right) == 0) {
               mirror.update(dst, 0xffffffffL)
             } else {
@@ -356,9 +430,14 @@ class TestBackendPipeline extends AnyFunSuite {
                 Some(Random.nextInt(mspec.numArchitecturalRegs))
               else None
             val rs1 = Random.nextInt(mspec.numArchitecturalRegs)
+            val rs2 = 
+                    if (Random.nextBoolean())
+                      Some(Random.nextInt(mspec.numArchitecturalRegs))
+                      else None
             if (rd.isDefined) {
               mirror(rd.get) = mirror(rs1) + 42
             }
+            if(printInsn) println("dummy_effect r" + rs1 + " r" + rs2 + " -> r" + rd)
             dut.io.input.simWrite(
               dut,
               p => {
@@ -366,10 +445,7 @@ class TestBackendPipeline extends AnyFunSuite {
                   p,
                   t = 3,
                   rs1 = Some(rs1),
-                  rs2 =
-                    if (Random.nextBoolean())
-                      Some(Random.nextInt(mspec.numArchitecturalRegs))
-                    else None,
+                  rs2 = rs2,
                   rd = rd,
                   const = Some(dummyEffectSeq),
                   opc = GenericOpcode.ADD
@@ -378,10 +454,110 @@ class TestBackendPipeline extends AnyFunSuite {
             )
             dummyEffectSeq += 1
           }
+          case x if 100 until 110 contains x => {
+            // LD
+            caseCount.update("LD", caseCount("LD") + 1)
+            val rd = Random.nextInt(mspec.numArchitecturalRegs)
+            val rs1 = Random.nextInt(mspec.numArchitecturalRegs)
+
+            val addr = mirror(rs1) & wordMask
+            val data = memMirror((addr / (mspec.dataWidth.value / 8)).toInt)
+            mirror.update(rd, data)
+            if(printInsn) println(
+              "request load: r" + rs1 + "(" + addr
+                .hexString() + ") -> r" + rd + ", data: " + data.hexString()
+            )
+
+            // mask
+            dut.io.input.simWrite(
+              dut,
+              p => {
+                MockPayload.create(
+                  p,
+                  t = 0,
+                  rs1 = Some(rs1),
+                  rs2 = None,
+                  const = Some(wordMask),
+                  rd = Some(rd),
+                  opc = GenericOpcode.AND
+                )
+              }
+            )
+
+            dut.io.input.simWrite(
+              dut,
+              p => {
+                MockPayload.create(
+                  p,
+                  t = 4,
+                  rs1 = Some(rd),
+                  rs2 = None,
+                  const = Some(0),
+                  rd = Some(rd),
+                  opc = GenericOpcode.LD
+                )
+              }
+            )
+
+            expectedExtraWritebackCount += 1
+          }
+          case x if 110 until 120 contains x => {
+            // ST
+            caseCount.update("ST", caseCount("ST") + 1)
+            val rs1 = Random.nextInt(mspec.numArchitecturalRegs)
+            val addr = mirror(rs1) & wordMask
+            mirror.update(rs1, addr)
+
+            // Read rs2 after updating rs1, in case rs1 == rs2.
+            val rs2 = Random.nextInt(mspec.numArchitecturalRegs)
+            memMirror.update(
+              (addr / (mspec.dataWidth.value / 8)).toInt,
+              mirror(rs2)
+            )
+            if(printInsn) println(
+              "request store: r" + rs1 + "(" + addr
+                .hexString() + ") <- mem[r" + rs2 + "], data: " + mirror(rs2).hexString()
+            )
+
+            // mask
+            dut.io.input.simWrite(
+              dut,
+              p => {
+                MockPayload.create(
+                  p,
+                  t = 0,
+                  rs1 = Some(rs1),
+                  rs2 = None,
+                  const = Some(wordMask),
+                  rd = Some(rs1),
+                  opc = GenericOpcode.AND
+                )
+              }
+            )
+
+            dut.io.input.simWrite(
+              dut,
+              p => {
+                MockPayload.create(
+                  p,
+                  t = 4,
+                  rs1 = Some(rs1),
+                  rs2 = Some(rs2),
+                  const = Some(0),
+                  rd = None,
+                  opc = GenericOpcode.ST
+                )
+              }
+            )
+
+            expectedExtraWritebackCount += 1
+          }
         }
       }
 
-      while (writebackCount < testSize) {
+      val expectedTotalWritebacks = testSize + expectedExtraWritebackCount
+
+      while (writebackCount < expectedTotalWritebacks) {
         dut.clockDomain.waitSampling()
       }
 
@@ -394,7 +570,7 @@ class TestBackendPipeline extends AnyFunSuite {
       )
 
       dut.clockDomain.waitSampling(100)
-      assert(writebackCount == testSize)
+      assert(writebackCount == expectedTotalWritebacks)
 
       for ((k, v) <- caseCount) {
         println(k + ": " + v)
