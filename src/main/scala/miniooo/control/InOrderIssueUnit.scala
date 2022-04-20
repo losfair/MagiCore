@@ -96,5 +96,17 @@ case class InOrderIssueUnit[T <: PolymorphicDataChain](
           Seq("[v=", arch.valid, " arch=", arch.index, " phys=", phys, "]")
         })
     )
+    val epochMgr = Machine.get[EpochManager]
+    epochMgr.incReq_ino.valid := True
+    epochMgr.incReq_ino.payload := dispatchInfo.epoch
+
+    Machine.report(
+      Seq(
+        "epoch count inc [ino]: epoch ",
+        dispatchInfo.epoch,
+        " prev ",
+        epochMgr.epochTable(dispatchInfo.epoch)
+      )
+    )
   }
 }

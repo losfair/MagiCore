@@ -288,7 +288,10 @@ case class IssueQueue[T <: PolymorphicDataChain](
         (prio, index, l._3 | r._3)
       })
 
-    (ok.setCompositeName(iqTagSpace, "pop_ok"), index.setCompositeName(iqTagSpace, "pop_index"))
+    (
+      ok.setCompositeName(iqTagSpace, "pop_ok"),
+      index.setCompositeName(iqTagSpace, "pop_index")
+    )
   }
 
   def preparePop(index: UInt) {
@@ -363,9 +366,10 @@ case class IssueUnit[T <: PolymorphicDataChain](
   }
 
   val issuePopApplyLogic = new Area {
-    val issueRequest = issuePopLogic.issueRequest
-      .pipelined(m2s = true, s2m = true)
-      .check(payloadInvariance = true)
+    // Function units should be prepared to handle the case where `valid` goes down without a `ready`.
+    val issueRequest = new ResetArea(reset = reset, cumulative = true) {
+      val v = issuePopLogic.issueRequest.m2sPipe()
+    }.v
 
     val iqContent =
       iqDataSpace.readAsync(
@@ -389,13 +393,33 @@ case class IssueUnit[T <: PolymorphicDataChain](
 
     when(unifiedIssuePort.fire) {
       iq.commitPop(issueRequest.payload.index)
+
+      var dispatchInfo: DispatchInfo = null
+      try {
+        dispatchInfo = iqContent.data.lookup[DispatchInfo]
+      } catch {
+        case _: Exception => {}
+      }
+      if (dispatchInfo != null) {
+        val epochMgr = Machine.get[EpochManager]
+        epochMgr.incReq_ooo.valid := True
+        epochMgr.incReq_ooo.payload := dispatchInfo.epoch
+
+        Machine.report(
+          Seq(
+            "epoch count inc [ooo]: epoch ",
+            dispatchInfo.epoch,
+            " prev ",
+            epochMgr.epochTable(dispatchInfo.epoch)
+          )
+        )
+      }
     }
 
     val issueOk = Vec(Bool(), io.issuePorts.size)
     for (b <- issueOk) b := False
 
     for ((fu, fuIndex) <- io.issuePorts.zipWithIndex) {
-      fu.check()
       fu.valid := False
       fu.payload := unifiedIssuePort.payload
 
@@ -432,7 +456,7 @@ case class IssueUnit[T <: PolymorphicDataChain](
       } catch {
         case _: Exception => {}
       }
-      //Machine.report(iq.report())
+      // Machine.report(iq.report())
     }
 
     io.issueMonitor << unifiedIssuePort.asFlow.throwWhen(

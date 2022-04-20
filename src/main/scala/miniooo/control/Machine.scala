@@ -27,8 +27,11 @@ case class MachineSpec(
   def robEntryIndexWidth = log2Up(robSize) bits
   val robEntryIndexType = HardType(UInt(robEntryIndexWidth))
 
-  def epochWidth = 16 bits
+  val numEpochs = 8
+  val epochWidth = log2Up(numEpochs) bits
   val epochType = HardType(UInt(epochWidth))
+
+  val epochCounterType = HardType(UInt(8 bits))
 }
 
 abstract class MachineSemantics {

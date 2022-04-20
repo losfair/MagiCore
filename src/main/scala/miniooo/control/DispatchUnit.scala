@@ -74,7 +74,8 @@ case class DispatchUnit[T <: PolymorphicDataChain](
     val writebackMonitor = Vec(Flow(CommitRequest(dataType)), spec.commitWidth)
   }
 
-  val currentEpoch = Reg(spec.epochType()) init (0)
+  val epochMgr = Machine.get[EpochManager]
+
   val exception = Reg(MachineException()) init (MachineException.idle)
   exception.valid := False
 
@@ -116,7 +117,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
       val output = outType
       output.parentObjects(0) := io.input.payload
       output.robIndex := pushPtr
-      output.epoch := currentEpoch
+      output.epoch := epochMgr.currentEpoch
 
       val outputStream = io.input.translateWith(output).continueWhen(!full)
 
@@ -165,7 +166,19 @@ case class DispatchUnit[T <: PolymorphicDataChain](
       // Arbitrated commit
       val commit = {
         val c = StreamArbiterFactory.roundRobin.on(io.commit)
-        c.throwWhen(c.payload.token.epoch =/= currentEpoch)
+
+        // Decrement epoch counter for both up-to-date and outdated commits
+        when(c.fire) {
+          Machine.report(
+            Seq("epoch count dec: epoch ", c.payload.token.epoch,
+            " prev ",
+            epochMgr.epochTable(c.payload.token.epoch))
+          )
+          epochMgr.decReq.valid := True
+          epochMgr.decReq.payload := c.payload.token.epoch
+        }
+
+        c.throwWhen(c.payload.token.epoch =/= epochMgr.currentEpoch)
       }
 
       val assignedBankIndex = getBankIndexForPtr(
@@ -322,9 +335,16 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           entryData.addr === pushPtr && (!risingOccupancy || Bool(i != 0))
         entryReady = entryReady && !localEmpty && entryData.data.completed
 
+        val nextEpoch = epochMgr.currentEpoch + 1
+        val nextEpochAvailable = epochMgr.epochTable(nextEpoch) === 0
+
+        // If this entry triggers an exception, ensure that the next epoch is available
+        entryReady =
+          entryReady && !(entryData.data.commitRequest.exception.valid && !nextEpochAvailable)
+
         when(entryReady && entryData.data.commitRequest.exception.valid) {
           exception := entryData.data.commitRequest.exception
-          currentEpoch := currentEpoch + 1
+          epochMgr.currentEpoch := nextEpoch
         }
 
         entryReady = entryReady && !entryData.data.commitRequest.exception.valid

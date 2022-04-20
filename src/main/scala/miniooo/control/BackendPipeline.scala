@@ -11,6 +11,9 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
   private val spec = Machine.get[MachineSpec]
   private val sem = Machine.get[MachineSemantics]
 
+  val epochMgr = EpochManager()
+  Machine.provide(epochMgr)
+
   val reset = Bool()
 
   val prf = PrfUnit(reset = reset)
