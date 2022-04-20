@@ -190,8 +190,7 @@ class TestBackendPipeline extends AnyFunSuite {
   test("TestBackendPipeline") {
     SimConfig.withWave.doSim(
       rtl = Machine.build { new TestBackendPipelineTop() },
-      name = "test",
-      seed = 897007899
+      name = "test"
     ) { dut =>
       dut.io.input.valid #= false
       dut.io.memBus.arw.ready #= false
