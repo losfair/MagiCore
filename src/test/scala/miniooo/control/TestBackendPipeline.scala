@@ -13,6 +13,7 @@ import miniooo.testutil.TestExt._
 import scala.collection.mutable
 import miniooo.lib.funit._
 import scala.reflect._
+import spinal.lib.bus.amba4.axi.Axi4
 
 class TestBackendPipeline extends AnyFunSuite {
   object TestTag {
@@ -44,12 +45,14 @@ class TestBackendPipeline extends AnyFunSuite {
       new Alu(TestTag.static(0), AluConfig(alu32 = false)),
       new Multiplier(TestTag.static(1), MultiplierConfig()),
       new Divider(TestTag.static(2)),
-      new DummyEffect(TestTag.static(3))
+      new DummyEffect(TestTag.static(3)),
+      new Lsu(TestTag.static(4), LsuConfig())
     )
   }
 
   object GenericOpcode extends SpinalEnum(binarySequential) {
-    val ADD, SUB, AND, OR, XOR, MOV, DIV_S, DIV_U, REM_S, REM_U = newElement()
+    val ADD, SUB, AND, OR, XOR, MOV, DIV_S, DIV_U, REM_S, REM_U, LD, ST =
+      newElement()
 
     def translateToAlu(
         that: SpinalEnumCraft[GenericOpcode.type]
@@ -94,6 +97,11 @@ class TestBackendPipeline extends AnyFunSuite {
         val op = DummyEffectOperation()
         op.value := const
         Some(op.asInstanceOf[T])
+      } else if (ctag == classTag[LsuOperation]) {
+        val op = LsuOperation()
+        op.isStore := opc === GenericOpcode.ST
+        op.offset := const.asSInt
+        Some(op.asInstanceOf[T])
       } else {
         None
       }
@@ -128,6 +136,8 @@ class TestBackendPipeline extends AnyFunSuite {
     Machine.provide(mspec)
     Machine.provide(msem)
     val pipeline = BackendPipeline(MockPayload())
+    val lsu =
+      pipeline.lookupFunctionUnitInstancesByType(classOf[LsuInstance]).head
     val io = new Bundle {
       val input = slave(Stream(MockPayload()))
 
@@ -141,7 +151,9 @@ class TestBackendPipeline extends AnyFunSuite {
       )
       val cycles = out(UInt(64 bits))
       val effectOutput = out(Flow(UInt(32 bits)))
+      val memBus = master(Axi4(lsu.io_axiMaster.config))
     }
+    lsu.io_axiMaster >> io.memBus
     io.input >> pipeline.io.input
     val prfIf = Machine.get[PrfInterface]
     io.regReadData := prfIf.readAsync(pipeline.rename.cmt(io.regReadAddr)).data
@@ -162,9 +174,15 @@ class TestBackendPipeline extends AnyFunSuite {
   test("TestBackendPipeline") {
     SimConfig.withWave.doSim(
       rtl = Machine.build { new TestBackendPipelineTop() },
-      name = "test"
+      name = "test",
+      seed = 1496989342
     ) { dut =>
       dut.io.input.valid #= false
+      dut.io.memBus.aw.ready #= false
+      dut.io.memBus.ar.ready #= false
+      dut.io.memBus.w.ready #= false
+      dut.io.memBus.b.valid #= false
+      dut.io.memBus.r.valid #= false
 
       dut.clockDomain.forkStimulus(100)
       waitUntil(dut.clockDomain.isResetAsserted)

@@ -15,7 +15,8 @@ trait DummyEffectInstance extends FunctionUnitInstance {
   def effectOutput: Flow[UInt]
 }
 
-class DummyEffect(val staticTag: Data) extends FunctionUnit {
+class DummyEffect(staticTagData: => Data) extends FunctionUnit {
+  def staticTag: Data = staticTagData
   private val spec = Machine.get[MachineSpec]
 
   private var effInst: EffectInstance = null

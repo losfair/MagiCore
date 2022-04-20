@@ -13,8 +13,9 @@ case class DividerOperation() extends Bundle with PolymorphicDataChain {
   val signed = Bool()
 }
 
-final case class Divider(staticTag: Data, enableException: Boolean = false)
+final class Divider(staticTagData: => Data, enableException: Boolean = false)
     extends FunctionUnit {
+  def staticTag: Data = staticTagData
   override def warnOnBlockedIssue = true
   override def generate(
       hardType: HardType[_ <: PolymorphicDataChain]

@@ -9,7 +9,8 @@ case class MultiplierConfig(
 
 )
 
-case class Multiplier(staticTag: Data, c: MultiplierConfig) extends FunctionUnit {
+class Multiplier(staticTagData: => Data, c: MultiplierConfig) extends FunctionUnit {
+  def staticTag: Data = staticTagData
   override def generate(
       hardType: HardType[_ <: PolymorphicDataChain]
   ): FunctionUnitInstance = {

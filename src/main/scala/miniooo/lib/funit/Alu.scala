@@ -22,7 +22,8 @@ case class AluOperation() extends Bundle with PolymorphicDataChain {
   val useConst = Bool()
 }
 
-case class Alu(staticTag: Data, c: AluConfig) extends FunctionUnit {
+class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
+  def staticTag: Data = staticTagData
   override def isAlu: Boolean = true
   override def generate(
       hardType: HardType[_ <: PolymorphicDataChain]
