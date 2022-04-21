@@ -98,7 +98,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
       val outStream_pipeline = Stream(CommitRequest(null))
       val outStream_oooRead = Stream(CommitRequest(null))
       val arbitratedStream = StreamArbiterFactory.lowerFirst.on(
-        Seq(outStream_pipeline.stage(), outStream_oooRead.stage())
+        Seq(outStream_oooRead.stage(), outStream_pipeline.stage())
       )
       arbitratedStream >/-> io_output
 
