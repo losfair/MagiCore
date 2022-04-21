@@ -34,7 +34,13 @@ class DummyEffect(staticTagData: => Data) extends FunctionUnit {
       val effectOutput = Flow(UInt(32 bits))
 
       val pending = Mem(UInt(32 bits), spec.robSize)
-      val pendingValid = Vec(Reg(Bool()) init (false), spec.robSize)
+      val pendingValid_scheduled = Machine.get[MachineException].resetArea {
+        Vec(Reg(Bool()) init (false), spec.robSize)
+      }
+      val pendingValid_posted = Vec(Reg(Bool()) init (false), spec.robSize)
+      val pendingValid = Vec(
+        pendingValid_scheduled.zip(pendingValid_posted).map(x => x._1 || x._2)
+      )
 
       val in = io_input.payload
       val op = in.lookup[DummyEffectOperation]
@@ -55,7 +61,15 @@ class DummyEffect(staticTagData: => Data) extends FunctionUnit {
         enable = io_input.fire
       )
       when(io_input.fire) {
-        pendingValid(dispatch.robIndex) := True
+        pendingValid_scheduled(dispatch.robIndex) := True
+        Machine.report(
+          Seq(
+            "scheduled dummy effect with robIndex ",
+            dispatch.robIndex,
+            " value ",
+            op.value
+          )
+        )
       }
 
       val effFifo = MultiLaneFifo(
@@ -71,17 +85,42 @@ class DummyEffect(staticTagData: => Data) extends FunctionUnit {
         effFifo.io.push.payload(i).payload := eff.payload.refine()
       }
 
+      when(effFifo.io.push.fire) {
+        for (eff <- effInst.io_effect) {
+          when(eff.valid) {
+            assert(
+              pendingValid_scheduled(
+                eff.payload.robIndex
+              ) === True,
+              "dummy effect not scheduled"
+            )
+            pendingValid_scheduled(
+              eff.payload.robIndex
+            ) := False
+            pendingValid_posted(eff.payload.robIndex) := True
+            Machine.report(
+              Seq("posted dummy effect with robIndex ", eff.payload.robIndex)
+            )
+          }
+        }
+      }
+
       effectOutput.setIdle()
 
       // Create latency
       val pop = effFifo.io.pop.stage().stage().stage()
       pop.setBlocked()
       when(pop.valid) {
-        assert(pendingValid(pop.payload.robIndex), "pendingValid must be true")
+        assert(
+          pendingValid_posted(pop.payload.robIndex),
+          "pendingValid_posted must be true"
+        )
         pop.ready := True
-        pendingValid(pop.payload.robIndex) := False
+        pendingValid_posted(pop.payload.robIndex) := False
         val value = pending(pop.payload.robIndex)
-        Machine.report(Seq("dummy effect: ", value))
+        Machine.report(
+          Seq("dummy effect: ", value, " robIndex ", pop.payload.robIndex)
+        )
         effectOutput.valid := True
         effectOutput.payload := value
       }
@@ -90,9 +129,7 @@ class DummyEffect(staticTagData: => Data) extends FunctionUnit {
 
   override def generateEffect(): Option[EffectInstance] = {
     val spec = Machine.get[MachineSpec]
-    effInst = new EffectInstance {
-
-    }
+    effInst = new EffectInstance {}
     Some(effInst)
   }
 

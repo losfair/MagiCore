@@ -355,8 +355,10 @@ case class IssueUnit[T <: PolymorphicDataChain](
     val (ok, index) = iq.queryPop(io.issueAvailable)
     issueRequest.valid := ok
     issueRequest.payload.index := index
-    issueRequest
-      .check() // only check control - payload is checked after the s2m stage
+    Machine.get[MachineException].resetArea {
+      issueRequest
+        .check() // only check control - payload is checked after the s2m stage
+    }
     val fastWakeup = iq.fastWakeupMem(index)
     when(issueRequest.fire) {
       iq.preparePop(index)

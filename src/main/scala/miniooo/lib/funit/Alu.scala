@@ -9,40 +9,104 @@ case class AluConfig(
     alu32: Boolean = false
 )
 
+case class AluBranchContext(branchShiftCount: BitCount)
+    extends Bundle
+    with PolymorphicDataChain {
+  private val spec = Machine.get[MachineSpec]
+  def parentObjects = Seq()
+
+  val pc = spec.dataType
+  val predictedBranchValid = Bool()
+  val predictedBranchTarget = spec.dataType
+}
+
 object AluOpcode extends SpinalEnum(binarySequential) {
-  val ADD, SUB, AND, OR, XOR, MOV = newElement()
+  val ADD, SUB, AND, OR, XOR, MOV, LOAD_PREDICATE_BUFFER, BRANCH, DYN_BRANCH =
+    newElement()
+}
+
+object AluBranchCondition extends SpinalEnum(binarySequential) {
+  val LT, LE, GT, GE, EQ, NE = newElement()
 }
 
 case class AluOperation() extends Bundle with PolymorphicDataChain {
+  private val spec = Machine.get[MachineSpec]
+
   def parentObjects = Seq()
 
   val opcode = AluOpcode()
+  val predicated = Bool()
   val alu32 = Bool()
   val const = Machine.get[MachineSpec].dataType
   val useConst = Bool()
+
+  // Branch control
+  val setPredicateInsteadOfBranch = Bool()
+  val brCond = AluBranchCondition()
+
+  def fillBranchFieldsForNonBranch() {
+    setPredicateInsteadOfBranch.assignDontCare()
+    brCond.assignDontCare()
+  }
 }
 
 class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
+  private val spec = Machine.get[MachineSpec]
+
   def staticTag: Data = staticTagData
   override def isAlu: Boolean = true
   override def generate(
       hardType: HardType[_ <: PolymorphicDataChain]
   ): FunctionUnitInstance = {
+    object BypassInfo {
+      def idle: BypassInfo = {
+        val x = BypassInfo()
+        x.assignDontCare()
+        x.valid := False
+        x
+      }
+    }
+
+    case class BypassInfo() extends Bundle {
+      val valid = Bool()
+      val index = spec.physRegIndexType
+      val data = spec.dataType
+    }
+
     new FunctionUnitInstance {
       val io_available = True
       val io_input = Stream(hardType())
       val io_output = Stream(CommitRequest(null))
 
+      val currentPredicate = Reg(Bool()) init (false)
+      val predicateBuffer = Reg(spec.dataType) init (0)
+
       val in = io_input.payload
       val out = CommitRequest(null)
 
       val op = in.lookup[AluOperation]
+      val decode = in.lookup[DecodeInfo]
+      val rename = in.lookup[RenameInfo]
       val dispatchInfo = in.lookup[DispatchInfo]
       val issue = in.lookup[IssuePort[_]]
-      val a = issue.srcRegData(0).asUInt
-      val b = op.useConst ? op.const.asUInt | issue.srcRegData(1).asUInt
+
+      val srcRegBypass = Machine.get[MachineException].resetArea {
+        Reg(BypassInfo()) init (BypassInfo.idle)
+      }
+
+      val srcRegValues = issue.srcRegData.map(_.asUInt)
+      val a = srcRegValues(0)
+      val b = op.useConst ? op.const.asUInt | srcRegValues(1)
       out.token := dispatchInfo.lookup[CommitToken]
       out.exception := MachineException.idle
+
+      val condLt = srcRegValues(0) < srcRegValues(1)
+      val condEq = srcRegValues(0) === srcRegValues(1)
+      val condLe = condLt || condEq
+      val condGt = !condLe
+      val condGe = !condLt
+      val condNe = !condEq
+      val brCtx = in.tryLookup[AluBranchContext]
 
       val outValue = UInt(out.regWriteValue(0).getWidth bits)
       outValue.assignDontCare()
@@ -66,6 +130,65 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
         is(AluOpcode.MOV) {
           outValue := b
         }
+        is(AluOpcode.LOAD_PREDICATE_BUFFER) {
+          predicateBuffer := a.asBits
+        }
+        if (brCtx.isDefined) {
+          is(AluOpcode.BRANCH) {
+            import AluBranchCondition._
+            val cond = op.brCond.mux(
+              LT -> condLt,
+              LE -> condLe,
+              GT -> condGt,
+              GE -> condGe,
+              EQ -> condEq,
+              NE -> condNe
+            )
+            when(io_input.fire) {
+              Machine.report(
+                Seq("branch operands: ", srcRegValues(0), " ", srcRegValues(1))
+              )
+            }
+            when(op.setPredicateInsteadOfBranch) {
+              currentPredicate := !cond
+            } otherwise {
+              val computedTarget_debug =
+                (brCtx.get.pc.asSInt + (op.const << brCtx.get.branchShiftCount.value).asSInt.resized).asBits
+
+              // If the branch decisions are different, or the target addresses are different
+              assert(
+                !brCtx.get.predictedBranchValid || brCtx.get.predictedBranchTarget === computedTarget_debug,
+                Seq(
+                  "branch prediction/computation mismatch: predicted=",
+                  brCtx.get.predictedBranchTarget,
+                  " computed=",
+                  computedTarget_debug
+                )
+              )
+              when(
+                cond =/= brCtx.get.predictedBranchValid
+              ) {
+                out.exception.valid := True
+                out.exception.code := MachineExceptionCode.BRANCH_MISS
+                out.exception.brSrcAddr := brCtx.get.pc
+                out.exception.brIsConst := True
+                out.exception.brTaken := cond
+              }
+            }
+          }
+          is(AluOpcode.DYN_BRANCH) {
+            val target = a.asBits
+            when(
+              !brCtx.get.predictedBranchValid || target =/= brCtx.get.predictedBranchTarget
+            ) {
+              out.exception.valid := True
+              out.exception.code := MachineExceptionCode.BRANCH_MISS
+              out.exception.brSrcAddr := brCtx.get.pc
+              out.exception.brDstAddr := target
+              out.exception.brIsConst := False
+            }
+          }
+        }
       }
 
       if (c.alu32) {
@@ -76,6 +199,22 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
         }
       } else {
         out.regWriteValue(0) := outValue.asBits
+      }
+
+      // `valid := False` write and `prf.write` happen on the same cycle.
+      when(io_output.fire) {
+        srcRegBypass.valid := False
+      }
+
+      when(io_input.fire) {
+        when(op.predicated && !currentPredicate) {
+          out.regWriteValue(0) := predicateBuffer
+        }
+        when(decode.archDstRegs(0).valid) {
+          srcRegBypass.valid := True
+          srcRegBypass.index := rename.physDstRegs(0)
+          srcRegBypass.data := out.regWriteValue(0)
+        }
       }
 
       io_output << io_input.translateWith(out)

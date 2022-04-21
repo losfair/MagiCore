@@ -80,7 +80,9 @@ class MiniGen extends Component {
         op.alu32 := alu32
         op.const := const.asBits.resized
         op.opcode := GenericOpcode.translateToAlu(opc)._2
+        op.predicated := False
         op.useConst := useConst
+        op.fillBranchFieldsForNonBranch()
         Some(op.asInstanceOf[T])
       } else if (ctag == classTag[DividerOperation]) {
         val op = DividerOperation()

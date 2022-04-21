@@ -63,14 +63,17 @@ case class InOrderIssueUnit[T <: PolymorphicDataChain](
 
   val issueOk = Vec(Bool(), io.issuePorts.size)
   for (b <- issueOk) b := False
+
+  val issueFuIndex = UInt(log2Up(c.portSpecs.size) bits)
+  issueFuIndex.assignDontCare()
   for ((fu, fuIndex) <- io.issuePorts.zipWithIndex) {
-    fu.check()
     fu.valid := False
     fu.payload := popStream.payload
 
     when(
       decodeInfo.functionUnitTag === c.portSpecs(fuIndex).staticTag
     ) {
+      issueFuIndex := fuIndex
       fu.valid := popStream.valid
       popStream.ready := fu.ready
       issueOk(fuIndex) := True
@@ -84,11 +87,27 @@ case class InOrderIssueUnit[T <: PolymorphicDataChain](
     !popStream.ready
   )
 
+  when(popStream.isStall) {
+    Machine.report(
+      Seq(
+        "ioiq stall - rob index ",
+        dispatchInfo.robIndex,
+        " fuIndex=", issueFuIndex,
+        " deps"
+      ) ++ decodeInfo.archSrcRegs
+        .zip(renameInfo.physSrcRegs)
+        .flatMap({ case (arch, phys) =>
+          Seq("[v=", arch.valid, " arch=", arch.index, " phys=", phys, "]")
+        })
+    )
+  }
+
   when(popStream.fire) {
     Machine.report(
       Seq(
         "ioiq issue - rob index ",
         dispatchInfo.robIndex,
+        " fuIndex=", issueFuIndex,
         " deps"
       ) ++ decodeInfo.archSrcRegs
         .zip(renameInfo.physSrcRegs)

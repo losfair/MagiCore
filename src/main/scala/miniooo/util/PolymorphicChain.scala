@@ -42,4 +42,9 @@ trait PolymorphicDataChain extends Data {
     }
     obj
   }
+
+  def tryLookup[T <: AnyRef: ClassTag]: Option[T] = {
+    val x = doLookup[T](classTag[T])
+    if(x == null) None else Some(x)
+  }
 }

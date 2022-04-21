@@ -93,6 +93,8 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
 
       val io_axiMaster = Axi4(axiConfig)
 
+      val epochMgr = Machine.get[EpochManager]
+
       val outStream_pipeline = Stream(CommitRequest(null))
       val outStream_oooRead = Stream(CommitRequest(null))
       val arbitratedStream = StreamArbiterFactory.lowerFirst.on(
@@ -149,10 +151,18 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
       }
 
       // Validate storeBuffer invariants
-      for (entry <- storeBuffer) {
+      for ((entry, i) <- storeBuffer.zipWithIndex) {
         assert(
           !entry.valid || pendingStoreValid(entry.srcRobIndex),
-          "store buffer invariant violation"
+          Seq(
+            "store buffer invariant violation - rob index ",
+            entry.srcRobIndex,
+            " psv.scheduled=",
+            resetArea.pendingStoreValid_scheduled(entry.srcRobIndex),
+            " psv.posted=",
+            pendingStoreValid_posted(entry.srcRobIndex),
+            " storeBufferIndex=" + i
+          )
         )
       }
 
@@ -181,7 +191,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         allocOk := firstReplace._1 || firstEmpty._1
       }
 
-      // This logic block may invalidate a `storeBuffer` entry. So, this logic needs to be 
+      // This logic block may invalidate a `storeBuffer` entry. So, this logic needs to be
       // before the `pipelineLogic` block which may write to (update) the same entry.
       val writeAckLogic = new Area {
         axiM.b.ready := True
@@ -204,7 +214,9 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               "store effect ack: robIndex=",
               robIndex,
               " evictBuffer=",
-              storeBufferIndex._1
+              storeBufferIndex._1,
+              " storeBufferIndex=",
+              storeBufferIndex._2
             )
           )
 
@@ -276,7 +288,30 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
             outStream_pipeline.valid := ok
             outStream_pipeline.payload := commitReq
             req.ready := ok && outStream_pipeline.ready
-            when(req.ready) {
+
+            when(req.isStall) {
+              Machine.report(
+                Seq(
+                  "store STALL - addr=",
+                  req.payload.addr.asUInt,
+                  " data=",
+                  req.payload.data,
+                  " robIndex=",
+                  req.payload.token.robIndex,
+                  " epoch=",
+                  req.payload.token.epoch,
+                  " previousStoreCompleted=",
+                  previousStoreCompleted,
+                  " allocOk=",
+                  storeBufferAllocLogic.allocOk
+                )
+              )
+            }
+
+            // Throw away outdated requests
+            when(
+              req.ready && req.payload.token.epoch === epochMgr.currentEpoch
+            ) {
               // Write to store buffer
               val bufEntry = StoreBufferEntry()
               bufEntry.valid := True
@@ -305,7 +340,11 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
                   "store scheduled - addr=",
                   req.payload.addr.asUInt,
                   " data=",
-                  req.payload.data
+                  req.payload.data,
+                  " robIndex=",
+                  req.payload.token.robIndex,
+                  " epoch=",
+                  req.payload.token.epoch
                 )
               )
             }
@@ -345,7 +384,11 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
                     "load bypass ok - addr=",
                     req.payload.addr.asUInt,
                     " data=",
-                    store.data
+                    store.data,
+                    " robIndex=",
+                    req.payload.token.robIndex,
+                    " epoch=",
+                    req.payload.token.epoch
                   )
                 )
               }
@@ -363,7 +406,11 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
                     "issueing ooo load at addr ",
                     req.payload.addr.asUInt,
                     " found=",
-                    found
+                    found,
+                    " robIndex=",
+                    req.payload.token.robIndex,
+                    " epoch=",
+                    req.payload.token.epoch
                   )
                 )
               }
@@ -383,9 +430,20 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
           .map(x => x.valid)
           .orR
         effFifo.io.push.payload := effInst.io_effect
+        when(effFifo.io.push.fire) {
+          for (eff <- effInst.io_effect) {
+            when(eff.valid) {
+              val scheduled = resetArea.pendingStoreValid_scheduled(
+                eff.payload.robIndex
+              )
+              scheduled := False
+              pendingStoreValid_posted(eff.payload.robIndex) := scheduled
+            }
+          }
+        }
 
         val robIndex = effFifo.io.pop.payload.robIndex
-        val isStore = resetArea.pendingStoreValid_scheduled(robIndex)
+        val isStore = pendingStoreValid_posted(robIndex)
         val store = pendingStores(robIndex)
         val popStream = effFifo.io.pop.throwWhen(!isStore)
         val (popToAw, popToW) = StreamFork2(popStream)
@@ -402,8 +460,6 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         axiM.w << popToW.translateWith(w)
 
         when(popStream.fire) {
-          resetArea.pendingStoreValid_scheduled(robIndex) := False
-          pendingStoreValid_posted(robIndex) := True
           Machine.report(
             Seq(
               "store effect fire: robIndex=",
@@ -432,7 +488,11 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
           Machine.report(
             Seq(
               "load ooo ok - data: ",
-              outStream_oooRead.payload.regWriteValue(0)
+              outStream_oooRead.payload.regWriteValue(0),
+              " robIndex=",
+              commitReq.token.robIndex,
+              " epoch=",
+              commitReq.token.epoch
             )
           )
         }
@@ -441,9 +501,22 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
       // Clear un-posted pending stores in the store buffer.
       when(effInst.io_reset) {
         for (entry <- storeBuffer) {
-          entry.valid := entry.valid && pendingStoreValid_posted(
-            entry.srcRobIndex
-          )
+          when(
+            !pendingStoreValid_posted(
+              entry.srcRobIndex
+            )
+          ) {
+            // Also invalidate the entry from the same cycle.
+            entry.valid := False
+            when(entry.valid) {
+              Machine.report(
+                Seq(
+                  "clearing un-posted pending store - rob index ",
+                  entry.srcRobIndex
+                )
+              )
+            }
+          }
         }
       }
     }
@@ -451,9 +524,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
 
   override def generateEffect(): Option[EffectInstance] = {
     val spec = Machine.get[MachineSpec]
-    effInst = new EffectInstance {
-
-    }
+    effInst = new EffectInstance {}
     Some(effInst)
   }
 }

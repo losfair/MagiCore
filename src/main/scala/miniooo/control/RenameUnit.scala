@@ -25,6 +25,32 @@ case class RenameUnit[T <: PolymorphicDataChain](
     val physRegIndex = spec.physRegIndexType
   }
 
+  def reportXmt(name: String, x: Vec[UInt]) {
+    Machine.report(
+      Seq("Mapping table " + name + ": ") ++ x.zipWithIndex.flatMap(y =>
+        Seq("[" + y._2 + "]=", y._1, " ")
+      )
+    )
+  }
+
+  def validateXmt(name: String, xmt: Vec[UInt], allowMask: Vec[Bool]) {
+    for (i <- 0 until spec.numArchitecturalRegs) {
+      assert(
+        xmt(i) === 0 || allowMask(xmt(i)) === False,
+        name + " index " + i + " is in the table but masked"
+      )
+      for (j <- i + 1 until spec.numArchitecturalRegs) {
+        assert(xmt(i) === 0 || xmt(i) =/= xmt(j), name + " is not a bijection")
+      }
+    }
+    for (i <- 0 until spec.numPhysicalRegs) {
+      assert(
+        allowMask(i) || xmt.map(x => x === i).orR,
+        name + " physreg " + i + " is masked but not in the table"
+      )
+    }
+  }
+
   def outType = new RenameInfo(dataType())
 
   val io = new Bundle {
@@ -42,17 +68,6 @@ case class RenameUnit[T <: PolymorphicDataChain](
     )
   val rmtAllowMask = Vec(Reg(Bool()) init (true), spec.numPhysicalRegs)
 
-  // Check RMT invariants
-  for (i <- 0 until spec.numArchitecturalRegs) {
-    assert(
-      rmt(i) === 0 || rmtAllowMask(rmt(i)) === False,
-      "rmt allow mask mismatch"
-    )
-    for (j <- i + 1 until spec.numArchitecturalRegs) {
-      assert(rmt(i) === 0 || rmt(i) =/= rmt(j), "RMT is not a bijection")
-    }
-  }
-
   // Committed Map Table
   val cmt =
     Vec(
@@ -61,16 +76,8 @@ case class RenameUnit[T <: PolymorphicDataChain](
     )
   val cmtAllowMask = Vec(Reg(Bool()) init (true), spec.numPhysicalRegs)
 
-  // Check CMT invariants
-  for (i <- 0 until spec.numArchitecturalRegs) {
-    assert(
-      cmt(i) === 0 || cmtAllowMask(cmt(i)) === False,
-      "cmt allow mask mismatch"
-    )
-    for (j <- i + 1 until spec.numArchitecturalRegs) {
-      assert(cmt(i) === 0 || cmt(i) =/= cmt(j), "CMT is not a bijection")
-    }
-  }
+  validateXmt("rmt", rmt, rmtAllowMask)
+  validateXmt("cmt", cmt, cmtAllowMask)
 
   // SRC refcount
   val srcRefcountWidth = 3 bits
@@ -130,16 +137,20 @@ case class RenameUnit[T <: PolymorphicDataChain](
     output.physDstRegs := Vec(
       decodeInfo.archDstRegs.map(entry => {
         val allocatedIndex = spec.physRegIndexType
+        val (thisAllocOk, index) = prfIf.state.findFreeReg(
+          Vec(
+            localAllowMask
+              .zip(zeroRefcountMask)
+              .zip(cmtAllowMask)
+              .map(x => x._1._1 && x._1._2 && x._2)
+          )
+        )
+        allocOk = entry.valid.mux(
+          True -> (allocOk && thisAllocOk),
+          False -> allocOk
+        )
+        localAllowMask = rmtAllowMask.clone()
         when(entry.valid) {
-          val (thisAllocOk, index) = prfIf.state.findFreeReg(
-            Vec(localAllowMask.zip(zeroRefcountMask).map(x => x._1 && x._2))
-          )
-          allocOk = entry.valid.mux(
-            True -> (allocOk && thisAllocOk),
-            False -> allocOk
-          )
-          // FIXME: This is incorrect!
-          localAllowMask = localAllowMask.clone()
           localAllowMask(index) := False
           when(io.output.fire) {
             prfIf.state.markAsBusyInPlace(index)
@@ -163,6 +174,11 @@ case class RenameUnit[T <: PolymorphicDataChain](
   io.output << io.input
     .translateWith(output)
     .continueWhen(allocOk && refcountIncOk)
+  when(io.input.isStall) {
+    Machine.report(
+      Seq("Rename STALL: allocOk=", allocOk, " refcountIncOk=", refcountIncOk)
+    )
+  }
 
   // Speculatively write RMT update
   when(io.output.fire) {
@@ -200,9 +216,13 @@ case class RenameUnit[T <: PolymorphicDataChain](
     )
   }
 
-  when(reset) {
-    rmt := cmt
-    rmtAllowMask := cmtAllowMask
+  // Ensure that this logic has higher priority than `DispatchUnit`.
+  Component.current.afterElaboration {
+    when(reset) {
+      rmt := cmt
+      rmtAllowMask := cmtAllowMask
+      reportXmt("rmt.reset", cmt)
+    }
   }
 }
 

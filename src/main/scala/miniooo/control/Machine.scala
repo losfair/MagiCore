@@ -87,8 +87,18 @@ class Machine {
 object MachineDebugMarker {}
 
 case class MachineException() extends Bundle {
+  private val spec = Machine.get[MachineSpec]
   val valid = Bool()
   val code = MachineExceptionCode()
+  val context1 = spec.dataType
+  val context2 = spec.dataType
+  val context3 = Bool()
+  val context4 = Bool()
+
+  def brSrcAddr = context1
+  def brDstAddr = context2
+  def brIsConst = context3
+  def brTaken = context4
 
   def resetArea[T](f: => T): T = {
     new ResetArea(reset = valid, cumulative = true) {
@@ -102,6 +112,10 @@ object MachineException {
     val e = MachineException()
     e.valid := False
     e.code.assignDontCare()
+    e.context1.assignDontCare()
+    e.context2.assignDontCare()
+    e.context3.assignDontCare()
+    e.context4.assignDontCare()
     e
   }
 }

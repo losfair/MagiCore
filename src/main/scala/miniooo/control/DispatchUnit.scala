@@ -85,6 +85,10 @@ case class DispatchUnit[T <: PolymorphicDataChain](
   Machine.provide(exception)
   exception.valid := False
 
+  when(exception.valid) {
+    Machine.report(Seq("exception HIGH: ", exception.code))
+  }
+
   val reset = exception.valid
 
   val rob = new Area {
@@ -165,6 +169,25 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           True -> U(0),
           False -> (pushPtr + 1)
         )
+
+        Machine.report(
+          Seq(
+            "Dispatch push: pushPtr=",
+            pushPtr,
+            " popPtr=",
+            popPtr,
+            " risingOccupancy=",
+            risingOccupancy,
+            " inOrder=",
+            inOrder
+          )
+        )
+      }
+
+      when(io.input.isStall) {
+        Machine.report(
+          Seq("Dispatch STALL: full=", full)
+        )
       }
     }
 
@@ -176,9 +199,12 @@ case class DispatchUnit[T <: PolymorphicDataChain](
         // Decrement epoch counter for both up-to-date and outdated commits
         when(c.fire) {
           Machine.report(
-            Seq("epoch count dec: epoch ", c.payload.token.epoch,
-            " prev ",
-            epochMgr.epochTable(c.payload.token.epoch))
+            Seq(
+              "epoch count dec: epoch ",
+              c.payload.token.epoch,
+              " prev ",
+              epochMgr.epochTable(c.payload.token.epoch)
+            )
           )
           epochMgr.decReq.valid := True
           epochMgr.decReq.payload := c.payload.token.epoch
@@ -322,7 +348,8 @@ case class DispatchUnit[T <: PolymorphicDataChain](
         .rotateLeft(currentBankIndex)
 
       // Continuous ready entries
-      var entryReady = True
+      // If `reset` is high on the current cycle, our internal state is a bit messy - don't expose it.
+      var entryReady = !reset
       val renameIf = Machine.get[RenameInterface]
       var cmtSnapshot = renameIf.unit.cmt
 
@@ -349,8 +376,9 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           entryReady && !(entryData.data.commitRequest.exception.valid && !nextEpochAvailable)
 
         // Commits following an exception should be ignored
-        if(i != 0) {
-          entryReady = entryReady && !readOutput(i - 1).data.commitRequest.exception.valid
+        if (i != 0) {
+          entryReady =
+            entryReady && !readOutput(i - 1).data.commitRequest.exception.valid
         }
 
         // On an exception:
@@ -359,10 +387,14 @@ case class DispatchUnit[T <: PolymorphicDataChain](
         when(entryReady && entryData.data.commitRequest.exception.valid) {
           exception := entryData.data.commitRequest.exception
           epochMgr.currentEpoch := nextEpoch
+
+          Machine.report(Seq("triggering exception"))
         }
 
         val renameInfo = entryData.data.commitRequest.lookup[RenameInfo]
         val decodeInfo = entryData.data.commitRequest.lookup[DecodeInfo]
+
+        val lastCmtSnapshot = cmtSnapshot
 
         cmtSnapshot = Vec(cmtSnapshot.map(x => {
           val v = spec.physRegIndexType
@@ -380,7 +412,8 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           // - It is requested to be written to
           // - The current entry is ready
           // - This entry does not cause an exception
-          val shouldWrite = dstRegArch.valid && entryReady && !entryData.data.commitRequest.exception.valid
+          val shouldWrite =
+            dstRegArch.valid && entryReady && !entryData.data.commitRequest.exception.valid
           when(shouldWrite) {
             val st = prfIf.state.table(dstRegPhys)
             assert(!st.busy)
@@ -388,9 +421,19 @@ case class DispatchUnit[T <: PolymorphicDataChain](
             assert(!st.allocatable)
 
             st.allocatable := True
+            Machine.report(
+              Seq(
+                "DispatchUnit.popLogic writing cmt: dst.arch=",
+                dstRegArch.index,
+                " dst.phys=",
+                dstRegPhys,
+                " prevPhys=",
+                lastCmtSnapshot(dstRegArch.index)
+              )
+            )
             cmtSnapshot.write(dstRegArch.index, dstRegPhys)
             renameIf.unit.cmtAllowMask
-              .write(cmtSnapshot(dstRegArch.index), True)
+              .write(lastCmtSnapshot(dstRegArch.index), True)
             renameIf.unit.cmtAllowMask.write(dstRegPhys, False)
           }
         }

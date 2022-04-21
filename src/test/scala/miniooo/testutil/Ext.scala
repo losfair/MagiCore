@@ -8,11 +8,16 @@ import spinal.core.sim._
 object TestExt {
   
   implicit class StreamExt[T <: Data](stream: Stream[T]) {
-    def simWrite(dut: Component, generate: T => Unit): Unit = {
+    def simWrite(dut: Component, generate: T => Unit, giveUp: => Boolean = false): Boolean = {
+      if(giveUp) {
+        dut.clockDomain.waitSampling()
+        return false
+      }
       stream.valid #= true
       generate(stream.payload)
-      dut.clockDomain.waitSamplingWhere(stream.ready.toBoolean)
+      dut.clockDomain.waitSamplingWhere(stream.ready.toBoolean || giveUp)
       stream.valid #= false
+      stream.ready.toBoolean
     }
 
     def simContinuousRead(dut: Component, latency: Int, generate: T => Unit): Unit = {

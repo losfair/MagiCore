@@ -83,7 +83,9 @@ class TestBackendException extends AnyFunSuite {
         op.alu32 := False
         op.const := const.asBits
         op.opcode := GenericOpcode.translateToAlu(opc)._2
+        op.predicated := False
         op.useConst := useConst
+        op.fillBranchFieldsForNonBranch()
         Some(op.asInstanceOf[T])
       } else if (ctag == classTag[DividerOperation]) {
         val op = DividerOperation()
