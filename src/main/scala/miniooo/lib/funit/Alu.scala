@@ -94,7 +94,17 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
         Reg(BypassInfo()) init (BypassInfo.idle)
       }
 
-      val srcRegValues = issue.srcRegData.map(_.asUInt)
+      val srcRegValues = (0 until spec.maxNumSrcRegsPerInsn).map(i => {
+        val matches = srcRegBypass.valid && srcRegBypass.index === rename
+          .physSrcRegs(i)
+        matches
+          .mux(
+            True -> srcRegBypass.data,
+            False -> issue.srcRegData(i)
+          )
+          .asUInt
+      })
+
       val a = srcRegValues(0)
       val b = op.useConst ? op.const.asUInt | srcRegValues(1)
       out.token := dispatchInfo.lookup[CommitToken]
@@ -217,7 +227,7 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
         }
       }
 
-      io_output << io_input.translateWith(out)
+      io_output <-< io_input.translateWith(out)
     }
   }
 
