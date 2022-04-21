@@ -342,7 +342,7 @@ class TestBackendPipeline extends AnyFunSuite {
         caseCount.update("BR_HIT", 0)
         caseCount.update("BR_MISS", 0)
 
-        val testSize = 50000
+        val testSize = 200000
         var writebackCount = 0
         var exceptionCount = 0
 
