@@ -61,6 +61,9 @@ class TestIssue extends AnyFunSuite {
     val prf = PrfUnit(reset = reset)
     Machine.provide(prf.interface)
 
+    val dummyExc = MachineException.idle
+    Machine.provide(dummyExc)
+
     val issue = IssueUnit(
       c = IssueConfig(portSpecs =
         (0 until numFunctionUnits).map(i =>
