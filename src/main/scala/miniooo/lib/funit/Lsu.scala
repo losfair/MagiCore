@@ -98,7 +98,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
       val arbitratedStream = StreamArbiterFactory.lowerFirst.on(
         Seq(outStream_pipeline.stage(), outStream_oooRead.stage())
       )
-      arbitratedStream >> io_output
+      arbitratedStream >/-> io_output
 
       val axiM = Axi4(axiConfig)
       axiM.ar >-> io_axiMaster.ar
@@ -452,9 +452,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
   override def generateEffect(): Option[EffectInstance] = {
     val spec = Machine.get[MachineSpec]
     effInst = new EffectInstance {
-      val io_effect: Vec[Flow[CommitEffect]] =
-        Vec(Flow(CommitEffect()), spec.commitWidth)
-      val io_reset: Bool = Bool()
+
     }
     Some(effInst)
   }

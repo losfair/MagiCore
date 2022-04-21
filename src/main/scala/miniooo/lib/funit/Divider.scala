@@ -38,24 +38,27 @@ final class Divider(staticTagData: => Data, enableException: Boolean = false)
       val io_input = Stream(hardType())
       val io_output = Stream(CommitRequest(null))
 
+      val outStream = Stream(CommitRequest(null))
+      outStream >/-> io_output
+
       val buffered_input = io_input.s2mPipe()
 
       val buffered_count = Reg(UInt(3 bits)) init (0)
-      when(io_input.fire && !io_output.fire) {
+      when(io_input.fire && !outStream.fire) {
         assert(
           buffered_count =/= buffered_count.maxValue,
           "buffered_count overflow"
         )
         buffered_count := buffered_count + 1
       }
-      when(!io_input.fire && io_output.fire) {
+      when(!io_input.fire && outStream.fire) {
         assert(buffered_count =/= 0, "buffered_count underflow")
         buffered_count := buffered_count - 1
       }
       val io_available = buffered_count === 0
 
       buffered_input.setBlocked()
-      io_output.setIdle()
+      outStream.setIdle()
 
       val rt = Reg(RtCtx())
 
@@ -159,11 +162,11 @@ final class Divider(staticTagData: => Data, enableException: Boolean = false)
                 False -> quotient
               )
               .resize(spec.dataWidth)
-            io_output.valid := True
-            io_output.payload.token := rt.token
-            io_output.payload.exception := MachineException.idle
-            io_output.payload.regWriteValue(0) := out
-            when(io_output.ready) {
+            outStream.valid := True
+            outStream.payload.token := rt.token
+            outStream.payload.exception := MachineException.idle
+            outStream.payload.regWriteValue(0) := out
+            when(outStream.ready) {
               Machine.report(Seq("end division: ", out))
               goto(init)
             }
@@ -171,11 +174,11 @@ final class Divider(staticTagData: => Data, enableException: Boolean = false)
         }
         val divError: State = if (enableException) new State {
           whenIsActive {
-            io_output.valid := True
-            io_output.payload.token := rt.token
-            io_output.payload.exception.valid := True
-            io_output.payload.exception.code := MachineExceptionCode.DIVIDE_ERROR
-            when(io_output.ready) {
+            outStream.valid := True
+            outStream.payload.token := rt.token
+            outStream.payload.exception.valid := True
+            outStream.payload.exception.code := MachineExceptionCode.DIVIDE_ERROR
+            when(outStream.ready) {
               Machine.report(Seq("end division error"))
               goto(init)
             }

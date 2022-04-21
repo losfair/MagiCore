@@ -68,7 +68,7 @@ class DummyEffect(staticTagData: => Data) extends FunctionUnit {
       effFifo.io.push.valid := effInst.io_effect.map(x => x.valid).orR
       for ((eff, i) <- effInst.io_effect.zipWithIndex) {
         effFifo.io.push.payload(i).valid := eff.valid
-        effFifo.io.push.payload(i).robIndex := eff.payload.robIndex
+        effFifo.io.push.payload(i).payload := eff.payload.refine()
       }
 
       effectOutput.setIdle()
@@ -91,9 +91,7 @@ class DummyEffect(staticTagData: => Data) extends FunctionUnit {
   override def generateEffect(): Option[EffectInstance] = {
     val spec = Machine.get[MachineSpec]
     effInst = new EffectInstance {
-      val io_effect: Vec[Flow[CommitEffect]] =
-        Vec(Flow(CommitEffect()), spec.commitWidth)
-      val io_reset: Bool = Bool()
+
     }
     Some(effInst)
   }

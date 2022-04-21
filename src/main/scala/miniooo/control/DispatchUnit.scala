@@ -50,6 +50,8 @@ case class RobEntry(hardType: HardType[_ <: PolymorphicDataChain])
   val completed = Bool()
 }
 
+case class FullCommitRequestType(ty: HardType[CommitRequest])
+
 case class DispatchUnit[T <: PolymorphicDataChain](
     dataType: HardType[T]
 ) extends Area {
@@ -58,8 +60,11 @@ case class DispatchUnit[T <: PolymorphicDataChain](
   private val sem = Machine.get[MachineSemantics]
 
   def commitRequestType = CommitRequest(null)
+  def fullCommitRequestType = CommitRequest(dataType)
   def outType = DispatchInfo(dataType())
   def robEntryType = RobEntry(dataType())
+
+  Machine.provide(FullCommitRequestType(fullCommitRequestType))
 
   case class ReadOutput() extends Bundle {
     val addr = spec.robEntryIndexType()
@@ -382,8 +387,9 @@ case class DispatchUnit[T <: PolymorphicDataChain](
         io.writebackMonitor(i).valid := entryReady
         io.writebackMonitor(i).payload := entryData.data.commitRequest
 
-        val eff = CommitEffect()
+        val eff = CommitEffect(fullCommitRequestType)
         eff.robIndex := entryData.addr
+        eff.data := entryData.data.commitRequest
 
         effects.foreach(x => {
           x._2
