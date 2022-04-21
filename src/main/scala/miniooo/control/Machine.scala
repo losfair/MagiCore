@@ -27,7 +27,7 @@ case class MachineSpec(
   def robEntryIndexWidth = log2Up(robSize) bits
   val robEntryIndexType = HardType(UInt(robEntryIndexWidth))
 
-  val numEpochs = 8
+  val numEpochs = 4
   val epochWidth = log2Up(numEpochs) bits
   val epochType = HardType(UInt(epochWidth))
 
