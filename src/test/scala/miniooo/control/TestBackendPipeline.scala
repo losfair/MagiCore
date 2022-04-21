@@ -386,7 +386,6 @@ class TestBackendPipeline extends AnyFunSuite {
             dut.clockDomain.waitSampling()
             if (dut.io.effectOutput.valid.toBoolean) {
               val value = dut.io.effectOutput.payload.toBigInt
-              println("got effect output: " + value)
               assert(value == nextDummyEffectValue)
               nextDummyEffectValue += 1
             }
@@ -414,7 +413,7 @@ class TestBackendPipeline extends AnyFunSuite {
           if (exceptionPending) {
             assert(expectingException, "got unexpected exception")
             expectingException = false
-            println("handling exception at cyc " + dut.io.cycles.toBigInt)
+            if(debug) println("handling exception at cyc " + dut.io.cycles.toBigInt)
             memMirror = memMirror_excSnapshot
             mirror = mirror_excSnapshot
             insnCount = insnCount_excSnapshot
@@ -549,7 +548,7 @@ class TestBackendPipeline extends AnyFunSuite {
                   Some(Random.nextInt(mspec.numArchitecturalRegs))
                 else None
               if (rd.isDefined) {
-                mirror(rd.get) = mirror(rs1) + 42
+                mirror(rd.get) = (mirror(rs1) + 42) & 0xffffffffL
                 if (!expectingException)
                   expectedWritebackLog += ((rd.get, mirror(rd.get)))
               }
@@ -685,6 +684,7 @@ class TestBackendPipeline extends AnyFunSuite {
                   )
                 caseCount.update("BR_MISS", caseCount("BR_MISS") + 1)
                 if (!expectingException) {
+                  exceptionCount += 1
                   expectingException = true
                   memMirror_excSnapshot = memMirror.toSeq.to[ArrayBuffer]
                   mirror_excSnapshot = mirror.toSeq.to[ArrayBuffer]
@@ -725,10 +725,10 @@ class TestBackendPipeline extends AnyFunSuite {
 
         val endCycles = dut.io.cycles.toBigInt
         println(
-          "Finished " + testSize + " instructions in " + (endCycles - startCycles) + " cycles. IPC=" + (testSize.toDouble / (endCycles - startCycles).toDouble)
+          "Finished " + insnCount + " instructions in " + (endCycles - startCycles) + " cycles. IPC=" + (insnCount.toDouble / (endCycles - startCycles).toDouble)
         )
         println(
-          "Total inserted delay is " + delayCount + " so minimum possible cycle count is " + (testSize + delayCount) + "."
+          "Total inserted delay is " + delayCount + " so minimum possible cycle count is " + (insnCount + delayCount) + "."
         )
 
         dut.clockDomain.waitSampling(100)
@@ -737,6 +737,8 @@ class TestBackendPipeline extends AnyFunSuite {
         for ((k, v) <- caseCount) {
           println(k + ": " + v)
         }
+
+        println("Total number of exceptions triggered: " + exceptionCount)
 
         for (i <- 0 until mspec.numArchitecturalRegs) {
           dut.io.regReadAddr #= i
