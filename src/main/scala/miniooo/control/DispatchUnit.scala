@@ -347,12 +347,18 @@ case class DispatchUnit[T <: PolymorphicDataChain](
         entryReady =
           entryReady && !(entryData.data.commitRequest.exception.valid && !nextEpochAvailable)
 
+        // Commits following an exception should be ignored
+        if(i != 0) {
+          entryReady = entryReady && !readOutput(i - 1).data.commitRequest.exception.valid
+        }
+
+        // On an exception:
+        // - Trigger a reset (through `exception.valid`)
+        // - Advance the epoch number
         when(entryReady && entryData.data.commitRequest.exception.valid) {
           exception := entryData.data.commitRequest.exception
           epochMgr.currentEpoch := nextEpoch
         }
-
-        entryReady = entryReady && !entryData.data.commitRequest.exception.valid
 
         val renameInfo = entryData.data.commitRequest.lookup[RenameInfo]
         val decodeInfo = entryData.data.commitRequest.lookup[DecodeInfo]
@@ -369,7 +375,11 @@ case class DispatchUnit[T <: PolymorphicDataChain](
               decodeInfo.archDstRegs
             )
         ) {
-          val shouldWrite = dstRegArch.valid && entryReady
+          // The register should be made "persistent" if:
+          // - It is requested to be written to
+          // - The current entry is ready
+          // - This entry does not cause an exception
+          val shouldWrite = dstRegArch.valid && entryReady && !entryData.data.commitRequest.exception.valid
           when(shouldWrite) {
             val st = prfIf.state.table(dstRegPhys)
             assert(!st.busy)
