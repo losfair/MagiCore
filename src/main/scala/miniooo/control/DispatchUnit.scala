@@ -82,6 +82,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
   val epochMgr = Machine.get[EpochManager]
 
   val exception = Reg(MachineException()) init (MachineException.idle)
+  Machine.provide(exception)
   exception.valid := False
 
   val reset = exception.valid

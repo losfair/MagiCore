@@ -64,7 +64,7 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
 
   rename.io.output >> dispatch.io.input
 
-  new ResetArea(reset = reset, cumulative = true) {
+  Machine.get[MachineException].resetArea {
     dispatch.io.oooOutput >/-> oooIssue.io.input
     if (inOrderIssue != null)
       dispatch.io.inOrderOutput >/-> inOrderIssue.io.input
@@ -140,7 +140,9 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
 
   val functionUnitInstances = functionUnitInstances_.toSeq
 
-  def lookupFunctionUnitInstancesByType[T <: FunctionUnitInstance](cls: Class[T]): Seq[T] =
+  def lookupFunctionUnitInstancesByType[T <: FunctionUnitInstance](
+      cls: Class[T]
+  ): Seq[T] =
     functionUnitInstances
       .filter(x => cls.isAssignableFrom(x.getClass()))
       .map(_.asInstanceOf[T])

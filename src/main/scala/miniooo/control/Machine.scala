@@ -89,6 +89,12 @@ object MachineDebugMarker {}
 case class MachineException() extends Bundle {
   val valid = Bool()
   val code = MachineExceptionCode()
+
+  def resetArea[T](f: => T): T = {
+    new ResetArea(reset = valid, cumulative = true) {
+      val out = f
+    }.out
+  }
 }
 
 object MachineException {
