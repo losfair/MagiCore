@@ -1,6 +1,8 @@
 name: CI
 on:
   push:
+  schedule:
+  - cron: '10 * * * *'
 jobs:
   test:
     runs-on: ubuntu-20.04
