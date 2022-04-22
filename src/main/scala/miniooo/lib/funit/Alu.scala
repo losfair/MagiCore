@@ -245,6 +245,7 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
               out.exception.code := MachineExceptionCode.BRANCH_MISS
               out.exception.brDstAddr := target
               out.exception.brIsConst := False
+              out.exception.brTaken := True
             }
           }
         }
