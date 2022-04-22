@@ -166,15 +166,17 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
                 (brCtx.get.pc.asSInt + (op.const << brCtx.get.branchShiftCount.value).asSInt.resized).asBits
 
               // If the branch decisions are different, or the target addresses are different
-              assert(
-                !brCtx.get.predictedBranchValid || brCtx.get.predictedBranchTarget === computedTarget_debug,
-                Seq(
-                  "branch prediction/computation mismatch: predicted=",
-                  brCtx.get.predictedBranchTarget,
-                  " computed=",
-                  computedTarget_debug
+              when(io_input.valid) {
+                assert(
+                  !brCtx.get.predictedBranchValid || brCtx.get.predictedBranchTarget === computedTarget_debug,
+                  Seq(
+                    "branch prediction/computation mismatch: predicted=",
+                    brCtx.get.predictedBranchTarget,
+                    " computed=",
+                    computedTarget_debug
+                  )
                 )
-              )
+              }
               when(
                 cond =/= brCtx.get.predictedBranchValid
               ) {
