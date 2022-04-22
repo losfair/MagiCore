@@ -6,6 +6,27 @@ import miniooo.util._
 import miniooo.control._
 
 case class FrontendSpec(
-  icacheSize: Int,
-  icacheMemPortDataWidth: Int
-)
+    icacheSize: Int,
+    icacheMemPortDataWidth: Int,
+    insnWidth: BitCount = 32 bits,
+    addrWidth: BitCount = 32 bits,
+    resetPc: BigInt = 0x0,
+    globalHistorySize: Int = 1024,
+    branchShiftCount: BitCount = 0 bits
+) {
+  val insnType = HardType(Bits(insnWidth))
+  val addrType = HardType(UInt(addrWidth))
+
+  def addrMask = ~U((insnWidth.value / 8) - 1, addrWidth)
+  val addrStep = insnWidth.value / 8
+
+  assert(isPow2(globalHistorySize))
+  val globalHistoryWidth = log2Up(globalHistorySize) bits
+  val globalHistoryType = HardType(Bits(globalHistoryWidth))
+}
+
+abstract class FrontendSemantics {
+  def decoder: DecoderInstance
+}
+
+trait DecoderInstance extends Area {}

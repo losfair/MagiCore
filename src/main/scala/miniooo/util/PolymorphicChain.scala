@@ -23,6 +23,12 @@ trait PolymorphicDataChain extends Data {
     if (this.parentObjects != null) {
       for (obj <- this.parentObjects) {
         if (obj != null) {
+          // Handle types that do not inherit from `PolymorphicDataChain`.
+          try {
+            return ctag.runtimeClass.cast(obj).asInstanceOf[T]
+          } catch {
+            case _: ClassCastException => {}
+          }
           try {
             val x = obj.asInstanceOf[PolymorphicDataChain].doLookup[T](ctag)
             if (x != null) return x
@@ -45,6 +51,6 @@ trait PolymorphicDataChain extends Data {
 
   def tryLookup[T <: AnyRef: ClassTag]: Option[T] = {
     val x = doLookup[T](classTag[T])
-    if(x == null) None else Some(x)
+    if (x == null) None else Some(x)
   }
 }

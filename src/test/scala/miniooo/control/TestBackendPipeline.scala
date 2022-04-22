@@ -98,7 +98,7 @@ class TestBackendPipeline extends AnyFunSuite {
     val const = UInt(32 bits)
     val useConst = Bool()
     val opc = GenericOpcode()
-    val brCtx = AluBranchContext(branchShiftCount = 2 bits)
+    val brCtx = AluBranchContext(branchShiftCount = 2 bits, globalHistoryWidth = 8 bits)
     val setPredicateInsteadOfBranch = Bool()
     def parentObjects: Seq[Data] = Seq(decode, brCtx)
 

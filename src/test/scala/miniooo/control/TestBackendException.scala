@@ -140,7 +140,7 @@ class TestBackendException extends AnyFunSuite {
       val cycles = out(UInt(64 bits))
       val exception = out(MachineException())
     }
-    io.exception := pipeline.exception
+    io.exception := pipeline.exception.exc
     io.input >> pipeline.io.input
     val prfIf = Machine.get[PrfInterface]
     io.regReadData := prfIf.readAsync(pipeline.rename.cmt(io.regReadAddr)).data

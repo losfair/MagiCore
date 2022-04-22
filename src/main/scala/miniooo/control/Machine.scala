@@ -3,6 +3,7 @@ package miniooo.control
 import spinal.core._
 import spinal.lib._
 import scala.reflect._
+import miniooo.util.PolymorphicDataChain
 
 case class MachineSpec(
     numArchitecturalRegs: Int,
@@ -90,12 +91,10 @@ case class MachineException() extends Bundle {
   private val spec = Machine.get[MachineSpec]
   val valid = Bool()
   val code = MachineExceptionCode()
-  val context1 = spec.dataType
   val context2 = spec.dataType
   val context3 = Bool()
   val context4 = Bool()
 
-  def brSrcAddr = context1
   def brDstAddr = context2
   def brIsConst = context3
   def brTaken = context4
@@ -112,7 +111,6 @@ object MachineException {
     val e = MachineException()
     e.valid := False
     e.code.assignDontCare()
-    e.context1.assignDontCare()
     e.context2.assignDontCare()
     e.context3.assignDontCare()
     e.context4.assignDontCare()
@@ -120,6 +118,26 @@ object MachineException {
   }
 }
 
+case class FullMachineException(dataType: HardType[_ <: PolymorphicDataChain])
+    extends Bundle
+    with PolymorphicDataChain {
+  val ctx = dataType()
+  def exc = ctx.lookup[MachineException]
+
+  def parentObjects = Seq(exc, ctx)
+}
+
+object FullMachineException {
+  def idle(
+      dataType: HardType[_ <: PolymorphicDataChain]
+  ): FullMachineException = {
+    val e = FullMachineException(dataType)
+    e.exc := MachineException.idle
+    e.ctx.assignDontCare()
+    e
+  }
+}
+
 object MachineExceptionCode extends SpinalEnum(binarySequential) {
-  val BRANCH_MISS, DIVIDE_ERROR = newElement()
+  val BRANCH_MISS, INSN_CACHE_MISS, DECODE_ERROR, DIVIDE_ERROR = newElement()
 }

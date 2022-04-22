@@ -9,8 +9,10 @@ case class AluConfig(
     alu32: Boolean = false
 )
 
-case class AluBranchContext(branchShiftCount: BitCount)
-    extends Bundle
+case class AluBranchContext(
+    branchShiftCount: BitCount,
+    globalHistoryWidth: BitCount
+) extends Bundle
     with PolymorphicDataChain {
   private val spec = Machine.get[MachineSpec]
   def parentObjects = Seq()
@@ -162,18 +164,18 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
             when(op.setPredicateInsteadOfBranch) {
               currentPredicate := !cond
             } otherwise {
-              val computedTarget_debug =
+              val computedTarget =
                 (brCtx.get.pc.asSInt + (op.const << brCtx.get.branchShiftCount.value).asSInt.resized).asBits
 
               // If the branch decisions are different, or the target addresses are different
               when(io_input.valid) {
                 assert(
-                  !brCtx.get.predictedBranchValid || brCtx.get.predictedBranchTarget === computedTarget_debug,
+                  !brCtx.get.predictedBranchValid || brCtx.get.predictedBranchTarget === computedTarget,
                   Seq(
                     "branch prediction/computation mismatch: predicted=",
                     brCtx.get.predictedBranchTarget,
                     " computed=",
-                    computedTarget_debug
+                    computedTarget
                   )
                 )
               }
@@ -182,7 +184,7 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
               ) {
                 out.exception.valid := True
                 out.exception.code := MachineExceptionCode.BRANCH_MISS
-                out.exception.brSrcAddr := brCtx.get.pc
+                out.exception.brDstAddr := computedTarget
                 out.exception.brIsConst := True
                 out.exception.brTaken := cond
               }
@@ -195,7 +197,6 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
             ) {
               out.exception.valid := True
               out.exception.code := MachineExceptionCode.BRANCH_MISS
-              out.exception.brSrcAddr := brCtx.get.pc
               out.exception.brDstAddr := target
               out.exception.brIsConst := False
             }

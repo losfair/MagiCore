@@ -41,7 +41,8 @@ case class CommitRequest(hardType: HardType[_ <: PolymorphicDataChain])
     (0 until spec.maxNumDstRegsPerInsn).map(_ => spec.dataType)
   )
   val exception = MachineException()
-  val parentObjects = if (hardType != null) Seq(hardType()) else Seq()
+  val ctx: PolymorphicDataChain = if (hardType != null) hardType() else null
+  def parentObjects = Seq(ctx, exception)
 }
 
 case class RobEntry(hardType: HardType[_ <: PolymorphicDataChain])
@@ -81,15 +82,18 @@ case class DispatchUnit[T <: PolymorphicDataChain](
 
   val epochMgr = Machine.get[EpochManager]
 
-  val exception = Reg(MachineException()) init (MachineException.idle)
+  val exception = Reg(
+    FullMachineException(fullCommitRequestType)
+  ) init (FullMachineException.idle(fullCommitRequestType))
   Machine.provide(exception)
-  exception.valid := False
+  Machine.provide(exception.exc)
+  exception.exc.valid := False
 
-  when(exception.valid) {
-    Machine.report(Seq("exception HIGH: ", exception.code))
+  when(exception.exc.valid) {
+    Machine.report(Seq("exception HIGH: ", exception.exc.code))
   }
 
-  val reset = exception.valid
+  val reset = exception.exc.valid
 
   val rob = new Area {
 
@@ -153,7 +157,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
       val assignedBankIndex = getBankIndexForPtr(pushPtr)
       val newEntry = robEntryType
       newEntry.commitRequest.assignDontCare()
-      newEntry.commitRequest.parentObjects(0) := io.input.payload
+      newEntry.commitRequest.ctx := io.input.payload
       newEntry.completed := False
       for ((b, i) <- banks.zipWithIndex) {
         b.write(
@@ -233,11 +237,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
         val oldEntry = b.readAsync(address = assignedEntryIndex)
         val newEntry = robEntryType
         newEntry.completed := True
-        newEntry.commitRequest.parentObjects
-          .zip(oldEntry.commitRequest.parentObjects)
-          .foreach { case (n, o) =>
-            n := o
-          }
+        newEntry.commitRequest.ctx := oldEntry.commitRequest.ctx
         newEntry.commitRequest.regWriteValue := commit.payload.regWriteValue
         newEntry.commitRequest.exception := commit.payload.exception
         newEntry.commitRequest.token := commit.payload.token
@@ -385,7 +385,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
         // - Trigger a reset (through `exception.valid`)
         // - Advance the epoch number
         when(entryReady && entryData.data.commitRequest.exception.valid) {
-          exception := entryData.data.commitRequest.exception
+          exception.ctx := entryData.data.commitRequest
           epochMgr.currentEpoch := nextEpoch
 
           Machine.report(Seq("triggering exception"))
