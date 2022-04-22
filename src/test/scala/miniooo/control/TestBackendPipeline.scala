@@ -56,7 +56,7 @@ class TestBackendPipeline extends AnyFunSuite {
   }
 
   object GenericOpcode extends SpinalEnum(binarySequential) {
-    val ADD, SUB, AND, OR, XOR, MOV, DIV_S, DIV_U, REM_S, REM_U, LD, ST, BLT,
+    val ADD, SUB, AND, OR, XOR, MOV, DIV_S, DIV_U, REM_S, REM_U, LD, ST, BLTU,
         BGE, BEQ =
       newElement()
 
@@ -73,7 +73,7 @@ class TestBackendPipeline extends AnyFunSuite {
         is(OR) { out := AluOpcode.OR }
         is(XOR) { out := AluOpcode.XOR }
         is(MOV) { out := AluOpcode.MOV }
-        is(BLT, BGE, BEQ) { out := AluOpcode.BRANCH }
+        is(BLTU, BGE, BEQ) { out := AluOpcode.BRANCH }
         default { ok := False }
       }
       (ok, out)
@@ -85,7 +85,7 @@ class TestBackendPipeline extends AnyFunSuite {
       val out = AluBranchCondition()
       out.assignDontCare()
       switch(that) {
-        is(BLT) { out := AluBranchCondition.LT }
+        is(BLTU) { out := AluBranchCondition.LTU }
         is(BGE) { out := AluBranchCondition.GE }
         is(BEQ) { out := AluBranchCondition.EQ }
       }
@@ -98,7 +98,7 @@ class TestBackendPipeline extends AnyFunSuite {
     val const = UInt(32 bits)
     val useConst = Bool()
     val opc = GenericOpcode()
-    val brCtx = AluBranchContext(branchShiftCount = 2 bits, globalHistoryWidth = 8 bits)
+    val brCtx = AluBranchContext(globalHistoryWidth = 8 bits)
     val setPredicateInsteadOfBranch = Bool()
     def parentObjects: Seq[Data] = Seq(decode, brCtx)
 
@@ -357,7 +357,12 @@ class TestBackendPipeline extends AnyFunSuite {
             for (ch <- dut.io.writebackMonitor) {
               if (ch.valid.toBoolean) {
                 val decode = ch.payload.lookup[DecodeInfo]
-                if (decode.archDstRegs(0).valid.toBoolean && !ch.payload.exception.valid.toBoolean) {
+                if (
+                  decode
+                    .archDstRegs(0)
+                    .valid
+                    .toBoolean && !ch.payload.exception.valid.toBoolean
+                ) {
                   val logIndex = actualWritebackLog.size
                   val (index, value) = (
                     decode.archDstRegs(0).index.toInt,
@@ -371,7 +376,7 @@ class TestBackendPipeline extends AnyFunSuite {
                     )
                   val expected = expectedWritebackLog(logIndex)
                   assert((index, value) == expected, "log validation failed")
-                  if(debug) println("validated writeback: " + (index, value))
+                  if (debug) println("validated writeback: " + (index, value))
                 }
                 writebackCount += 1
               }
@@ -413,7 +418,8 @@ class TestBackendPipeline extends AnyFunSuite {
           if (exceptionPending) {
             assert(expectingException, "got unexpected exception")
             expectingException = false
-            if(debug) println("handling exception at cyc " + dut.io.cycles.toBigInt)
+            if (debug)
+              println("handling exception at cyc " + dut.io.cycles.toBigInt)
             memMirror = memMirror_excSnapshot
             mirror = mirror_excSnapshot
             insnCount = insnCount_excSnapshot
@@ -708,9 +714,9 @@ class TestBackendPipeline extends AnyFunSuite {
                   t = 0,
                   rs1 = Some(rs1),
                   rs2 = Some(rs2),
-                  const = Some(3),
+                  const = Some(12),
                   rd = None,
-                  opc = GenericOpcode.BLT,
+                  opc = GenericOpcode.BLTU,
                   predictedBranch = predicted
                 )
               })

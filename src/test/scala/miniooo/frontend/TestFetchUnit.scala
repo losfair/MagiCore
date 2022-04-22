@@ -35,7 +35,6 @@ class TestFetchUnit extends AnyFunSuite {
   val fspec = FrontendSpec(
     icacheSize = 4096,
     icacheMemPortDataWidth = 32,
-    branchShiftCount = 2 bits,
     globalHistorySize = 2048
   )
 

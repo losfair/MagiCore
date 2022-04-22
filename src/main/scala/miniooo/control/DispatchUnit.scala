@@ -411,9 +411,9 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           // The register should be made "persistent" if:
           // - It is requested to be written to
           // - The current entry is ready
-          // - This entry does not cause an exception
+          // - This entry does not cause an exception (excluding branches)
           val shouldWrite =
-            dstRegArch.valid && entryReady && !entryData.data.commitRequest.exception.valid
+            dstRegArch.valid && entryReady && (!entryData.data.commitRequest.exception.valid || entryData.data.commitRequest.exception.code === MachineExceptionCode.BRANCH_MISS)
           when(shouldWrite) {
             val st = prfIf.state.table(dstRegPhys)
             assert(!st.busy)

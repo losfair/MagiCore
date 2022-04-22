@@ -6,11 +6,11 @@ import miniooo.util.PolymorphicDataChain
 import miniooo.control._
 
 case class AluConfig(
-    alu32: Boolean = false
+    alu32: Boolean = false,
+    linkOffset: Int = 4
 )
 
 case class AluBranchContext(
-    branchShiftCount: BitCount,
     globalHistoryWidth: BitCount
 ) extends Bundle
     with PolymorphicDataChain {
@@ -23,12 +23,13 @@ case class AluBranchContext(
 }
 
 object AluOpcode extends SpinalEnum(binarySequential) {
-  val ADD, SUB, AND, OR, XOR, MOV, LOAD_PREDICATE_BUFFER, BRANCH, DYN_BRANCH =
+  val ADD, SUB, AND, OR, XOR, MOV, SLL, SRL, SRA, CMP, ADD_TO_PC,
+      LOAD_PREDICATE_BUFFER, BRANCH, DYN_BRANCH, LINK =
     newElement()
 }
 
 object AluBranchCondition extends SpinalEnum(binarySequential) {
-  val NONE, LT, LE, GT, GE, EQ, NE = newElement()
+  val LT, LTU, LE, GT, GE, EQ, NE = newElement()
 }
 
 case class AluOperation() extends Bundle with PolymorphicDataChain {
@@ -97,7 +98,9 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
       }
 
       val srcRegValues = (0 until spec.maxNumSrcRegsPerInsn).map(i => {
-        val matches = decode.archSrcRegs(i).valid && srcRegBypass.valid && srcRegBypass.index === rename
+        val matches = decode
+          .archSrcRegs(i)
+          .valid && srcRegBypass.valid && srcRegBypass.index === rename
           .physSrcRegs(i)
         matches
           .mux(
@@ -112,16 +115,34 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
       out.token := dispatchInfo.lookup[CommitToken]
       out.exception := MachineException.idle
 
-      val condLt = srcRegValues(0) < srcRegValues(1)
+      val condLt = srcRegValues(0).asSInt < srcRegValues(1).asSInt
+      val condLtu = srcRegValues(0) < srcRegValues(1)
       val condEq = srcRegValues(0) === srcRegValues(1)
       val condLe = condLt || condEq
       val condGt = !condLe
       val condGe = !condLt
       val condNe = !condEq
+      val cond = op.brCond.mux(
+        AluBranchCondition.LT -> condLt,
+        AluBranchCondition.LTU -> condLtu,
+        AluBranchCondition.LE -> condLe,
+        AluBranchCondition.GT -> condGt,
+        AluBranchCondition.GE -> condGe,
+        AluBranchCondition.EQ -> condEq,
+        AluBranchCondition.NE -> condNe
+      )
+
       val brCtx = in.tryLookup[AluBranchContext]
 
       val outValue = UInt(out.regWriteValue(0).getWidth bits)
       outValue.assignDontCare()
+
+      val linkValue =
+        if (brCtx.isDefined) brCtx.get.pc.asUInt + c.linkOffset else null
+      val pcAddConst =
+        if (brCtx.isDefined)
+          (brCtx.get.pc.asSInt + op.const.asSInt.resized).asUInt
+        else null
 
       switch(op.opcode) {
         is(AluOpcode.ADD) {
@@ -142,21 +163,40 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
         is(AluOpcode.MOV) {
           outValue := b
         }
+        is(AluOpcode.SLL) {
+          outValue := (a << b(
+            log2Up(spec.dataWidth.value) - 1 downto 0
+          )).resized
+        }
+        is(AluOpcode.SRL) {
+          outValue := a >> b(log2Up(spec.dataWidth.value) - 1 downto 0)
+        }
+        is(AluOpcode.SRA) {
+          outValue := (a.asSInt >> b(
+            log2Up(spec.dataWidth.value) - 1 downto 0
+          )).asUInt
+        }
+        is(AluOpcode.CMP) {
+          outValue := cond.asUInt.resized
+        }
         is(AluOpcode.LOAD_PREDICATE_BUFFER) {
           predicateBuffer := a.asBits
         }
         if (brCtx.isDefined) {
+          is(AluOpcode.ADD_TO_PC) {
+            outValue := pcAddConst
+          }
+          is(AluOpcode.LINK) {
+            when(io_input.valid) {
+              assert(
+                brCtx.get.predictedBranchValid,
+                "LINK operation must be used with a valid branch"
+              )
+            }
+            outValue := linkValue
+          }
           is(AluOpcode.BRANCH) {
             import AluBranchCondition._
-            val cond = op.brCond.mux(
-              NONE -> True,
-              LT -> condLt,
-              LE -> condLe,
-              GT -> condGt,
-              GE -> condGe,
-              EQ -> condEq,
-              NE -> condNe
-            )
             when(io_input.fire) {
               Machine.report(
                 Seq("branch operands: ", srcRegValues(0), " ", srcRegValues(1))
@@ -165,8 +205,7 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
             when(op.setPredicateInsteadOfBranch) {
               currentPredicate := !cond
             } otherwise {
-              val computedTarget =
-                (brCtx.get.pc.asSInt + (op.const << brCtx.get.branchShiftCount.value).asSInt.resized).asBits
+              val computedTarget = pcAddConst.asBits
 
               // If the branch decisions are different, or the target addresses are different
               when(io_input.valid) {
@@ -192,7 +231,11 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
             }
           }
           is(AluOpcode.DYN_BRANCH) {
-            val target = a.asBits
+            when(io_input.valid) {
+              assert(op.useConst, "DYN_BRANCH must use a constant")
+            }
+            val target = (a + op.const.asUInt.resized).asBits
+            outValue := linkValue
             when(
               !brCtx.get.predictedBranchValid || target =/= brCtx.get.predictedBranchTarget
             ) {

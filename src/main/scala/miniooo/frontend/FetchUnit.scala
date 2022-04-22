@@ -47,7 +47,6 @@ case class FetchPacket() extends Bundle with PolymorphicDataChain {
   override def decodeAs[T <: AnyRef](ctag: ClassTag[T]): Option[T] = {
     if (ctag == classTag[AluBranchContext]) {
       val ctx = AluBranchContext(
-        branchShiftCount = fspec.branchShiftCount,
         globalHistoryWidth = fspec.globalHistoryWidth
       )
       ctx.pc := pc.asBits
@@ -193,7 +192,7 @@ case class FetchUnit() extends Area {
     gshareMem.write(gshareMemWriteAddr, gshareMemWriteData, gshareMemWriteValid)
 
     val gshareQuery = gshareMem(
-      (s1.data.globalHistory ^ s1.out.pc
+      (s1.data.globalHistory ^ (s1.out.pc >> log2Up(fspec.addrStep))
         .resize(fspec.globalHistoryWidth)
         .asBits).asUInt
     )
@@ -292,7 +291,9 @@ case class FetchUnit() extends Area {
         )
         s2.gshareMemWriteAddr := (theirFetchPacket.globalHistory.resize(
           s2.gshareMemWriteAddr.getWidth
-        ) ^ theirFetchPacket.pc.asBits.resized).asUInt
+        ) ^ (theirFetchPacket.pc >> log2Up(
+          fspec.addrStep
+        )).asBits.resized).asUInt
         s2.gshareMemWriteData.valid := True
         s2.gshareMemWriteData.taken := exc.exc.brTaken
 
