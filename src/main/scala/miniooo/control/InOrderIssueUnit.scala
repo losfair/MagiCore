@@ -52,7 +52,9 @@ case class InOrderIssueUnit[T <: PolymorphicDataChain](
 
   val issuePort = issueDataType
   for ((r, i) <- issuePort.srcRegData.zipWithIndex) {
-    r := prf.readAsync(renameInfo.physSrcRegs(i)).data
+    r := decodeInfo.archSrcRegs(i).valid ? prf
+      .readAsync(renameInfo.physSrcRegs(i))
+      .data | B(0, r.getWidth bits)
   }
 
   issuePort.data := front.data
@@ -92,7 +94,8 @@ case class InOrderIssueUnit[T <: PolymorphicDataChain](
       Seq(
         "ioiq stall - rob index ",
         dispatchInfo.robIndex,
-        " fuIndex=", issueFuIndex,
+        " fuIndex=",
+        issueFuIndex,
         " deps"
       ) ++ decodeInfo.archSrcRegs
         .zip(renameInfo.physSrcRegs)
@@ -107,7 +110,8 @@ case class InOrderIssueUnit[T <: PolymorphicDataChain](
       Seq(
         "ioiq issue - rob index ",
         dispatchInfo.robIndex,
-        " fuIndex=", issueFuIndex,
+        " fuIndex=",
+        issueFuIndex,
         " deps"
       ) ++ decodeInfo.archSrcRegs
         .zip(renameInfo.physSrcRegs)

@@ -97,7 +97,7 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
       }
 
       val srcRegValues = (0 until spec.maxNumSrcRegsPerInsn).map(i => {
-        val matches = srcRegBypass.valid && srcRegBypass.index === rename
+        val matches = decode.archSrcRegs(i).valid && srcRegBypass.valid && srcRegBypass.index === rename
           .physSrcRegs(i)
         matches
           .mux(

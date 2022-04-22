@@ -389,7 +389,9 @@ case class IssueUnit[T <: PolymorphicDataChain](
     unifiedIssuePort.valid := issueRequest.valid
     issueRequest.ready := unifiedIssuePort.ready
     unifiedIssuePort.payload.srcRegData := Vec(
-      srcRegContent.map(x => x.data)
+      srcRegContent.zipWithIndex.map { case (x, i) =>
+        decodeInfo.archSrcRegs(i).valid ? x.data | B(0, x.data.getWidth bits)
+      }
     )
     unifiedIssuePort.payload.data := iqContent.data
 
