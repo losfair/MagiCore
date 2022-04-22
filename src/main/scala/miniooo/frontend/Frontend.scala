@@ -11,8 +11,7 @@ case class FrontendSpec(
     insnWidth: BitCount = 32 bits,
     addrWidth: BitCount = 32 bits,
     resetPc: BigInt = 0x0,
-    globalHistorySize: Int = 1024,
-    branchShiftCount: BitCount = 0 bits
+    globalHistorySize: Int = 1024
 ) {
   val insnType = HardType(Bits(insnWidth))
   val addrType = HardType(UInt(addrWidth))

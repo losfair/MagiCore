@@ -13,7 +13,7 @@ object EarlyExceptionCode extends SpinalEnum(binarySequential) {
 
 case class EarlyException() extends Bundle with PolymorphicDataChain {
   def parentObjects = Seq()
-  def code = EarlyExceptionCode()
+  val code = EarlyExceptionCode()
 }
 
 class EarlyExcPassthrough(staticTagData: => Data) extends FunctionUnit {
@@ -47,6 +47,8 @@ class EarlyExcPassthrough(staticTagData: => Data) extends FunctionUnit {
           out.exception.code := MachineExceptionCode.INSN_CACHE_MISS
         }
       }
+
+      out.exception.assignUnassignedByName(MachineException.idle)
 
       io_output <-/< io_input.translateWith(out)
     }

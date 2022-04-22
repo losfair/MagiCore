@@ -29,7 +29,7 @@ object AluOpcode extends SpinalEnum(binarySequential) {
 }
 
 object AluBranchCondition extends SpinalEnum(binarySequential) {
-  val LT, LTU, LE, GT, GE, EQ, NE = newElement()
+  val LT, LTU, LE, GT, GE, GEU, EQ, NE = newElement()
 }
 
 case class AluOperation() extends Bundle with PolymorphicDataChain {
@@ -121,6 +121,7 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
       val condLe = condLt || condEq
       val condGt = !condLe
       val condGe = !condLt
+      val condGeu = !condLtu
       val condNe = !condEq
       val cond = op.brCond.mux(
         AluBranchCondition.LT -> condLt,
@@ -128,6 +129,7 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
         AluBranchCondition.LE -> condLe,
         AluBranchCondition.GT -> condGt,
         AluBranchCondition.GE -> condGe,
+        AluBranchCondition.GEU -> condGeu,
         AluBranchCondition.EQ -> condEq,
         AluBranchCondition.NE -> condNe
       )
