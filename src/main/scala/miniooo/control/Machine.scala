@@ -132,8 +132,8 @@ object FullMachineException {
       dataType: HardType[_ <: PolymorphicDataChain]
   ): FullMachineException = {
     val e = FullMachineException(dataType)
-    e.exc := MachineException.idle
     e.ctx.assignDontCare()
+    e.exc := MachineException.idle
     e
   }
 }
