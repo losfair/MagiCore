@@ -18,7 +18,7 @@ import spinal.lib.bus.misc.SizeMapping
 import miniooo.testutil.TestSyncResetSpinalConfig
 
 class TestRiscv extends AnyFunSuite {
-  val debug = true
+  val debug = false
   val memSize = 4096
   val numWords = memSize / 4
 
@@ -135,6 +135,11 @@ class TestRiscv extends AnyFunSuite {
           0x00, 0x03, 0x29, 0x01, 0x00, 0x13, 0x01, 0x01, 0x01, 0x67, 0x80,
           0x00, 0x00
         )
+
+        // Zero out memory
+        for (i <- 0 until numWords) {
+          dut.io.mem.simWriteBytes(dut, i * 4, Seq(0, 0, 0, 0))
+        }
 
         dut.io.mem.simWriteBytes(dut, 0, insnTemplate.map(_.toByte))
 
