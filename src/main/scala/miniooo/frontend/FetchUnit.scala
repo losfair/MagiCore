@@ -249,6 +249,7 @@ case class FetchUnit() extends Area {
       Machine.report(Seq("Requesting cache refill. PC=", fetch.pc))
     }
     when(waitingRefill) {
+      Machine.report(Seq("Waiting for cache refill. PC=", refillAddr))
       assert(
         pcStreamGen.valid === False,
         "unexpected valid status for pc stream gen during refill"

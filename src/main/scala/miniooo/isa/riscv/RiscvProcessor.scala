@@ -9,7 +9,7 @@ import miniooo.frontend._
 import miniooo.lib.funit._
 import spinal.lib.bus.amba4.axi._
 
-case class RiscvProcessor(resetPc: BigInt) extends Component {
+case class RiscvProcessor(resetPc: BigInt = 0x0, debug: Boolean = false) extends Component {
   object FuTag extends SpinalEnum(binarySequential) {
     val ALU, LSU, MUL, DIV, EARLY_EXC = newElement()
   }
@@ -39,9 +39,11 @@ case class RiscvProcessor(resetPc: BigInt) extends Component {
   Machine.provide(mspec)
   Machine.provide(fspec)
 
+  if(debug) Machine.provide(MachineDebugMarker)
+
   val msem = new MachineSemantics {
     lazy val functionUnits: Seq[FunctionUnit] = Seq(
-      new Alu(FuTag.LSU, AluConfig(alu32 = false)),
+      new Alu(FuTag.ALU, AluConfig(alu32 = false)),
       new Multiplier(FuTag.MUL, MultiplierConfig()),
       new Divider(FuTag.DIV, enableException = true),
       new Lsu(FuTag.LSU, LsuConfig()),
@@ -63,7 +65,10 @@ case class RiscvProcessor(resetPc: BigInt) extends Component {
     divPort = FuTag.DIV
   )
   fetch.io.output >> decode.io.input
-  decode.io.output >/-> pipeline.io.input
+
+  Machine.get[MachineException].resetArea {
+    decode.io.output >/-> pipeline.io.input
+  }
 
   fetch.io.branchInfoFeedback := decode.io.branchInfoFeedback
   fetch.io.flush := False

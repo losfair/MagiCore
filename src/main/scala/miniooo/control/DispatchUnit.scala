@@ -5,6 +5,7 @@ import spinal.lib._
 import miniooo.util._
 import MiniOoOExt._
 import scala.reflect._
+import miniooo.lib.funit.AluBranchContext
 
 case class DispatchInfo(hardType: HardType[_ <: PolymorphicDataChain])
     extends Bundle
@@ -457,6 +458,8 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           risingOccupancy := False
           popPtr := entryData.addr + 1
 
+          val brCtx = entryData.data.commitRequest.tryLookup[AluBranchContext]
+
           Machine.report(
             Seq(
               "writeback rob entry cyc=",
@@ -467,7 +470,8 @@ case class DispatchUnit[T <: PolymorphicDataChain](
               entryData.data.commitRequest.exception.valid,
               " exc.code ",
               entryData.data.commitRequest.exception.code
-            ) ++ renameInfo.physDstRegs
+            ) ++ (if (brCtx.isDefined) Seq(" pc ", brCtx.get.pc)
+                  else Seq()) ++ renameInfo.physDstRegs
               .zip(
                 decodeInfo.archDstRegs
               )
