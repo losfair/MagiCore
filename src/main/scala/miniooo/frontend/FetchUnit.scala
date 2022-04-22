@@ -145,7 +145,11 @@ case class FetchUnit() extends Area {
     out << pcFetchStage
       .throwWhen(pcFetchStage.payload.pcTag =/= rescheduleTag)
       .translateWith(data)
-      .check(payloadInvariance = true)
+
+    exc.exc.resetArea {
+      // Payload can change during refill
+      out.check()
+    }
 
     io.output << out
 
@@ -214,8 +218,17 @@ case class FetchUnit() extends Area {
       }
 
       when(decision) {
-        Machine.report(Seq("Rescheduling based on prediction - pc=", s1.out.pc))
+        Machine.report(
+          Seq(
+            "Rescheduling based on prediction - pc=",
+            s1.out.pc,
+            " target=",
+            io.branchInfoFeedback.target
+          )
+        )
         s1.rescheduleTag := !s1.rescheduleTag
+        pcStreamGen.pc.pc := io.branchInfoFeedback.target
+        pcStreamGen.pc.pcTag := !s1.rescheduleTag
       } otherwise {
         Machine.report(Seq("Not rescheduling - pc=", s1.out.pc))
       }
@@ -273,7 +286,10 @@ case class FetchUnit() extends Area {
             s2.gshareMemWriteAddr
           )
         )
-        pcStreamGen.pc.pc := exc.exc.brDstAddr.asUInt
+        pcStreamGen.pc.pc := exc.exc.brTaken.mux(
+          False -> ((theirFetchPacket.pc & fspec.addrMask) + fspec.addrStep),
+          True -> exc.exc.brDstAddr.asUInt
+        )
         s2.gshareMemWriteAddr := (theirFetchPacket.globalHistory.resize(
           s2.gshareMemWriteAddr.getWidth
         ) ^ theirFetchPacket.pc.asBits.resized).asUInt
