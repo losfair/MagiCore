@@ -163,7 +163,10 @@ case class FetchUnit() extends Area {
     icache.io.cpu.fetch.mmuRsp.physicalAddress := pcFetchStage.pc & fspec.addrMask
 
     val data = FetchPacket()
-    data.cacheMiss := icache.io.cpu.fetch.cacheMiss
+
+    // `cacheMiss` can be `X` on the first cycle.
+    // XXX: Review this.
+    data.cacheMiss := icache.io.cpu.fetch.cacheMiss || icache.io.cpu.prefetch.haltIt
     data.insn := icache.io.cpu.fetch.data
     data.pc := pcFetchStage.pc
     data.pcTag := pcFetchStage.pcTag
