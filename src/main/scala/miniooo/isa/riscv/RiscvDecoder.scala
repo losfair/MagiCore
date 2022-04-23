@@ -13,6 +13,7 @@ import miniooo.lib.funit.AluBranchCondition
 import miniooo.lib.funit.AluOpcode
 import javax.swing.plaf.multi.MultiOptionPaneUI
 import miniooo.lib.funit.DividerOperation
+import miniooo.lib.funit.LsuOperationSize
 
 object ImmType extends SpinalEnum(binarySequential) {
   val X, I, H, S, B, J, U =
@@ -137,6 +138,13 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
       val x = LsuOperation()
       x.isStore := fetch.insn(5)
       x.offset := ImmType.interpret(immType, fetch.insn)._2.asSInt
+      x.size := fetch
+        .insn(13 downto 12)
+        .mux(
+          M"00" -> LsuOperationSize.BYTE.craft(),
+          M"01" -> LsuOperationSize.HALF.craft(),
+          M"1-" -> LsuOperationSize.WORD.craft()
+        )
       Some(x.asInstanceOf[T])
     } else if (ctag == classTag[DividerOperation]) {
       val x = DividerOperation()
