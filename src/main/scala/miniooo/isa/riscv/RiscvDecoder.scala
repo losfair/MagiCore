@@ -228,6 +228,7 @@ case class RiscvDecoder(
       out.immType := ImmType.J
     }
     is(E.JALR) {
+      io.branchInfoFeedback.isUnconditionalDynamicBranch := True
       out.rdValid := True
       out.rs1Valid := True
       out.fuTag := aluPort

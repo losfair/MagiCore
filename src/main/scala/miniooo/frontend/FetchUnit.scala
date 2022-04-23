@@ -17,6 +17,7 @@ object BranchInfoFeedback {
     val x = BranchInfoFeedback()
     x.isUnconditionalStaticBranch := False
     x.isConditionalBranch := False
+    x.isUnconditionalDynamicBranch := False
     x.backward := False
     x.target.assignDontCare()
     x
@@ -28,6 +29,7 @@ case class BranchInfoFeedback() extends Bundle {
 
   val isUnconditionalStaticBranch = Bool()
   val isConditionalBranch = Bool()
+  val isUnconditionalDynamicBranch = Bool()
   val backward = Bool()
   val target = fspec.addrType()
 }
@@ -61,6 +63,8 @@ case class FetchPacket() extends Bundle with PolymorphicDataChain {
 
 case class FetchUnit() extends Area {
   private val fspec = Machine.get[FrontendSpec]
+
+  def pcWordAddr(pc: UInt): UInt = pc >> log2Up(fspec.addrStep)
 
   object PcGen {
     def init: PcGen = {
@@ -100,8 +104,14 @@ case class FetchUnit() extends Area {
   }
   val exc = Machine.get[FullMachineException]
 
-  val pcStream = Stream(PcGen())
+  val pcStream = Stream(FetchPacket())
   val speculatedGlobalHistory = Reg(fspec.globalHistoryType()) init (0)
+
+  case class BtbEntry() extends Bundle {
+    val valid = Bool()
+    val from = fspec.addrType()
+    val to = fspec.addrType()
+  }
 
   // PC generation
   val pcStreamGen = new Area {
@@ -113,7 +123,27 @@ case class FetchUnit() extends Area {
     }
 
     pcStream.valid := valid
-    pcStream.payload := pc
+    pcStream.payload.pc := pc.pc
+    pcStream.payload.pcTag := pc.pcTag
+  }
+
+  val lowLatencyPredictor = new Area {
+    val btb = Mem(BtbEntry(), fspec.btbSize)
+    val btbEntry = btb(
+      pcWordAddr(pcStreamGen.pc.pc).resize(fspec.btbWidth)
+    )
+    val btbHit = btbEntry.valid && btbEntry.from === pcStreamGen.pc.pc
+    pcStream.payload.predictedBranchValid := btbHit
+    pcStream.payload.predictedBranchTarget := btbEntry.to
+
+    when(pcStream.fire && btbHit) {
+      pcStreamGen.pc.pc := btbEntry.to
+    }
+
+    val btbWriteValid = False
+    val btbWriteAddr = UInt(fspec.btbWidth) assignDontCare ()
+    val btbWriteData = BtbEntry() assignDontCare ()
+    btb.write(btbWriteAddr, btbWriteData, btbWriteValid)
   }
 
   // Fetch
@@ -138,8 +168,8 @@ case class FetchUnit() extends Area {
     data.pc := pcFetchStage.pc
     data.pcTag := pcFetchStage.pcTag
     data.globalHistory := speculatedGlobalHistory
-    data.predictedBranchValid := False
-    data.predictedBranchTarget := 0
+    data.predictedBranchValid := pcFetchStage.predictedBranchValid
+    data.predictedBranchTarget := pcFetchStage.predictedBranchTarget
 
     out << pcFetchStage
       .throwWhen(pcFetchStage.payload.pcTag =/= rescheduleTag)
@@ -184,7 +214,6 @@ case class FetchUnit() extends Area {
       val taken = Bool()
     }
     val gshareMem = Mem(GshareEntry(), fspec.globalHistorySize)
-    gshareMem.init((0 until fspec.globalHistorySize).map(_ => GshareEntry.idle))
 
     val gshareMemWriteValid = False
     val gshareMemWriteAddr = UInt(fspec.globalHistoryWidth) assignDontCare ()
@@ -192,7 +221,7 @@ case class FetchUnit() extends Area {
     gshareMem.write(gshareMemWriteAddr, gshareMemWriteData, gshareMemWriteValid)
 
     val gshareQuery = gshareMem(
-      (s1.data.globalHistory ^ (s1.out.pc >> log2Up(fspec.addrStep))
+      (s1.data.globalHistory ^ pcWordAddr(s1.out.pc)
         .resize(fspec.globalHistoryWidth)
         .asBits).asUInt
     )
@@ -216,18 +245,48 @@ case class FetchUnit() extends Area {
         s1.data.predictedBranchTarget := io.branchInfoFeedback.target
       }
 
-      when(decision) {
+      // Reschedule if:
+      // - Our decision is different from the low-latency predictor's one, and
+      // - This branch is not a dynamic branch (in which case we are not able to make a prediction)
+      val reschedule =
+        (decision =/= s1.pcFetchStage.predictedBranchValid ||
+          (
+            decision && io.branchInfoFeedback.target =/= s1.pcFetchStage.predictedBranchTarget
+          )) && !io.branchInfoFeedback.isUnconditionalDynamicBranch
+
+      when(reschedule) {
+        val next = decision.mux(
+          True -> io.branchInfoFeedback.target,
+          False -> ((s1.out.pc & fspec.addrMask) + fspec.addrStep)
+        )
+
         Machine.report(
           Seq(
             "Rescheduling based on prediction - pc=",
             s1.out.pc,
-            " target=",
-            io.branchInfoFeedback.target
+            " brTarget=",
+            io.branchInfoFeedback.target,
+            " nextPC=",
+            next,
+            " decision=",
+            decision,
+            " predicted=",
+            s1.data.predictedBranchValid
           )
         )
+
         s1.rescheduleTag := !s1.rescheduleTag
-        pcStreamGen.pc.pc := io.branchInfoFeedback.target
+        pcStreamGen.pc.pc := next
         pcStreamGen.pc.pcTag := !s1.rescheduleTag
+
+        val btbEntry = BtbEntry()
+        btbEntry.valid := decision
+        btbEntry.from := s1.out.pc
+        btbEntry.to := next
+
+        lowLatencyPredictor.btbWriteValid := True
+        lowLatencyPredictor.btbWriteAddr := pcWordAddr(s1.out.pc).resized
+        lowLatencyPredictor.btbWriteData := btbEntry
       } otherwise {
         Machine.report(Seq("Not rescheduling - pc=", s1.out.pc))
       }
@@ -292,9 +351,7 @@ case class FetchUnit() extends Area {
         )
         s2.gshareMemWriteAddr := (theirFetchPacket.globalHistory.resize(
           s2.gshareMemWriteAddr.getWidth
-        ) ^ (theirFetchPacket.pc >> log2Up(
-          fspec.addrStep
-        )).asBits.resized).asUInt
+        ) ^ pcWordAddr(theirFetchPacket.pc).asBits.resized).asUInt
         s2.gshareMemWriteData.valid := True
         s2.gshareMemWriteData.taken := exc.exc.brTaken
 
@@ -303,6 +360,16 @@ case class FetchUnit() extends Area {
             speculatedGlobalHistory.getWidth - 2 downto 0
           ) ## exc.exc.brTaken.asBits
           s2.gshareMemWriteValid := True
+        } otherwise {
+          val btbEntry = BtbEntry()
+          btbEntry.valid := True
+          btbEntry.from := theirFetchPacket.pc
+          btbEntry.to := exc.exc.brDstAddr.asUInt
+          lowLatencyPredictor.btbWriteValid := True
+          lowLatencyPredictor.btbWriteAddr := pcWordAddr(
+            theirFetchPacket.pc
+          ).resized
+          lowLatencyPredictor.btbWriteData := btbEntry
         }
       } otherwise {
         Machine.report(Seq("Got exception - IFetch lockup."))

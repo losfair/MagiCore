@@ -80,6 +80,7 @@ class TestFetchUnit extends AnyFunSuite {
     val brInfo = BranchInfoFeedback()
     brInfo.isUnconditionalStaticBranch := False
     brInfo.isConditionalBranch := fetch.io.output.payload.insn(31)
+    brInfo.isUnconditionalDynamicBranch := False
     brInfo.backward := fetch.io.output.payload.insn(15)
     brInfo.target := fetch.io.output.payload.pc + (fetch.io.output.payload.insn(
       15 downto 0

@@ -11,7 +11,8 @@ case class FrontendSpec(
     insnWidth: BitCount = 32 bits,
     addrWidth: BitCount = 32 bits,
     resetPc: BigInt = 0x0,
-    globalHistorySize: Int = 1024
+    globalHistorySize: Int = 1024,
+    btbSize: Int = 512
 ) {
   val insnType = HardType(Bits(insnWidth))
   val addrType = HardType(UInt(addrWidth))
@@ -22,6 +23,9 @@ case class FrontendSpec(
   assert(isPow2(globalHistorySize))
   val globalHistoryWidth = log2Up(globalHistorySize) bits
   val globalHistoryType = HardType(Bits(globalHistoryWidth))
+
+  assert(isPow2(btbSize))
+  val btbWidth = log2Up(btbSize) bits
 }
 
 abstract class FrontendSemantics {
