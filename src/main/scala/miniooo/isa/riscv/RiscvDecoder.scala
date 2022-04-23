@@ -143,7 +143,7 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
         .mux(
           M"00" -> LsuOperationSize.BYTE.craft(),
           M"01" -> LsuOperationSize.HALF.craft(),
-          M"1-" -> LsuOperationSize.WORD.craft()
+          default -> LsuOperationSize.WORD.craft()
         )
       Some(x.asInstanceOf[T])
     } else if (ctag == classTag[DividerOperation]) {
