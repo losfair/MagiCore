@@ -45,13 +45,8 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
   val fetch = FetchPacket()
 
   val rs1Valid = Bool()
-  val rs1 = UInt(5 bits)
-
   val rs2Valid = Bool()
-  val rs2 = UInt(5 bits)
-
   val rdValid = Bool()
-  val rd = UInt(5 bits)
 
   val fuTag = mspec.functionUnitTagType()
   val immType = ImmType()
@@ -59,6 +54,8 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
   def parentObjects = Seq(fetch)
 
   override def decodeAs[T <: AnyRef](ctag: ClassTag[T]): Option[T] = {
+    val E = RvEncoding
+
     if (ctag == classTag[EarlyException]) {
       val x = EarlyException()
       x.code := fetch.cacheMiss ? EarlyExceptionCode.CACHE_MISS | EarlyExceptionCode.DECODE_ERROR
@@ -66,11 +63,11 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
     } else if (ctag == classTag[DecodeInfo]) {
       val x = DecodeInfo(null)
       x.archSrcRegs(0).valid := rs1Valid
-      x.archSrcRegs(0).index := rs1
+      x.archSrcRegs(0).index := fetch.insn(E.rs1Range).asUInt
       x.archSrcRegs(1).valid := rs2Valid
-      x.archSrcRegs(1).index := rs2
+      x.archSrcRegs(1).index := fetch.insn(E.rs2Range).asUInt
       x.archDstRegs(0).valid := rdValid
-      x.archDstRegs(0).index := rd
+      x.archDstRegs(0).index := fetch.insn(E.rdRange).asUInt
       x.functionUnitTag := fuTag
       Some(x.asInstanceOf[T])
     } else if (ctag == classTag[AluOperation]) {
@@ -179,16 +176,13 @@ case class RiscvDecoder(
   val out = DecodePacket()
   out.fetch := io.input.payload
   out.rs1Valid := False
-  out.rs1 := insn(E.rs1Range).asUInt
   out.rs2Valid := False
-  out.rs2 := insn(E.rs2Range).asUInt
   out.rdValid := False
-  out.rd := insn(E.rdRange).asUInt
 
   val outPatched = DecodePacket()
-  outPatched.rs1Valid := out.rs1Valid && out.rs1 =/= 0
-  outPatched.rs2Valid := out.rs2Valid && out.rs2 =/= 0
-  outPatched.rdValid := out.rdValid && out.rd =/= 0
+  outPatched.rs1Valid := out.rs1Valid && insn(E.rs1Range).asUInt =/= 0
+  outPatched.rs2Valid := out.rs2Valid && insn(E.rs2Range).asUInt =/= 0
+  outPatched.rdValid := out.rdValid && insn(E.rdRange).asUInt =/= 0
   outPatched.assignUnassignedByName(out)
 
   when(out.fetch.cacheMiss) {
