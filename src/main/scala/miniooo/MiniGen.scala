@@ -92,6 +92,7 @@ class MiniGen extends Component {
       } else if (ctag == classTag[LsuOperation]) {
         val op = LsuOperation()
         op.isStore := opc === GenericOpcode.ST
+        op.size := LsuOperationSize.WORD
         op.offset := const.asSInt
         Some(op.asInstanceOf[T])
       } else {

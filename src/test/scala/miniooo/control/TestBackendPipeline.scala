@@ -56,8 +56,8 @@ class TestBackendPipeline extends AnyFunSuite {
   }
 
   object GenericOpcode extends SpinalEnum(binarySequential) {
-    val ADD, SUB, AND, OR, XOR, MOV, DIV_S, DIV_U, REM_S, REM_U, LD, ST, BLTU,
-        BGE, BEQ =
+    val ADD, SUB, AND, OR, XOR, MOV, DIV_S, DIV_U, REM_S, REM_U, LD_B, LD_H,
+        LD_W, ST_B, ST_H, ST_W, BLTU, BGE, BEQ =
       newElement()
 
     def translateToAlu(
@@ -124,7 +124,14 @@ class TestBackendPipeline extends AnyFunSuite {
         Some(op.asInstanceOf[T])
       } else if (ctag == classTag[LsuOperation]) {
         val op = LsuOperation()
-        op.isStore := opc === GenericOpcode.ST
+        op.isStore := opc === GenericOpcode.ST_B || opc === GenericOpcode.ST_H || opc === GenericOpcode.ST_W
+        op.size := opc.mux(
+          GenericOpcode.ST_B -> LsuOperationSize.BYTE.craft(),
+          GenericOpcode.LD_B -> LsuOperationSize.BYTE.craft(),
+          GenericOpcode.ST_H -> LsuOperationSize.HALF.craft(),
+          GenericOpcode.LD_H -> LsuOperationSize.HALF.craft(),
+          default -> LsuOperationSize.WORD.craft()
+        )
         op.offset := const.asSInt
         Some(op.asInstanceOf[T])
       } else {
@@ -294,7 +301,7 @@ class TestBackendPipeline extends AnyFunSuite {
                 rs2 = Some(1),
                 const = Some(0),
                 rd = None,
-                opc = GenericOpcode.ST
+                opc = GenericOpcode.ST_W
               )
             }
           )
@@ -337,8 +344,10 @@ class TestBackendPipeline extends AnyFunSuite {
         caseCount.update("MUL", 0)
         caseCount.update("DIV_U", 0)
         caseCount.update("DUMMY_EFFECT", 0)
-        caseCount.update("LD", 0)
-        caseCount.update("ST", 0)
+        caseCount.update("LD_W", 0)
+        caseCount.update("LD_B", 0)
+        caseCount.update("ST_W", 0)
+        caseCount.update("ST_B", 0)
         caseCount.update("BR_HIT", 0)
         caseCount.update("BR_MISS", 0)
 
@@ -575,13 +584,15 @@ class TestBackendPipeline extends AnyFunSuite {
               })
               dummyEffectSeq += 1
             }
-            case x if 100 until 110 contains x => {
-              // LD
-              caseCount.update("LD", caseCount("LD") + 1)
+            case x if 100 until 105 contains x => {
+              // LD_W
+              caseCount.update("LD_W", caseCount("LD_W") + 1)
               val rd = Random.nextInt(mspec.numArchitecturalRegs)
               val rs1 = Random.nextInt(mspec.numArchitecturalRegs)
 
-              val addr = mirror(rs1) & wordMask
+              val mask = (wordMask >> 2) << 2
+
+              val addr = mirror(rs1) & mask
               val data = memMirror((addr / (mspec.dataWidth.value / 8)).toInt)
               mirror.update(rd, data)
               if (!expectingException) {
@@ -590,7 +601,7 @@ class TestBackendPipeline extends AnyFunSuite {
               }
               if (printInsn)
                 println(
-                  "request load: r" + rs1 + "(" + addr
+                  "ld_w: r" + rs1 + "(" + addr
                     .hexString() + ") -> r" + rd + ", data: " + data.hexString()
                 )
 
@@ -601,7 +612,7 @@ class TestBackendPipeline extends AnyFunSuite {
                   t = 0,
                   rs1 = Some(rs1),
                   rs2 = None,
-                  const = Some(wordMask),
+                  const = Some(mask),
                   rd = Some(rd),
                   opc = GenericOpcode.AND
                 )
@@ -615,16 +626,67 @@ class TestBackendPipeline extends AnyFunSuite {
                   rs2 = None,
                   const = Some(0),
                   rd = Some(rd),
-                  opc = GenericOpcode.LD
+                  opc = GenericOpcode.LD_W
                 )
               })
               insnCount += 1
             }
-            case x if 110 until 120 contains x => {
-              // ST
-              caseCount.update("ST", caseCount("ST") + 1)
+            case x if 105 until 110 contains x => {
+              // LD_B
+              caseCount.update("LD_B", caseCount("LD_B") + 1)
+              val rd = Random.nextInt(mspec.numArchitecturalRegs)
               val rs1 = Random.nextInt(mspec.numArchitecturalRegs)
-              val addr = mirror(rs1) & wordMask
+
+              val mask = wordMask
+
+              val addr = mirror(rs1) & mask
+              val bitShift = (addr & ((mspec.dataWidth.value / 8) - 1)) * 8
+              val data = (memMirror(
+                (addr / (mspec.dataWidth.value / 8)).toInt
+              ) >> bitShift.toInt) & 0xff
+              mirror.update(rd, data)
+              if (!expectingException) {
+                expectedWritebackLog += ((rd, addr))
+                expectedWritebackLog += ((rd, mirror(rd)))
+              }
+              if (printInsn)
+                println(
+                  "ld_b: r" + rs1 + "(" + addr
+                    .hexString() + ") -> r" + rd + ", data: " + data.hexString()
+                )
+
+              // mask
+              writeIt(p => {
+                MockPayload.create(
+                  p,
+                  t = 0,
+                  rs1 = Some(rs1),
+                  rs2 = None,
+                  const = Some(mask),
+                  rd = Some(rd),
+                  opc = GenericOpcode.AND
+                )
+              })
+
+              writeIt(p => {
+                MockPayload.create(
+                  p,
+                  t = 4,
+                  rs1 = Some(rd),
+                  rs2 = None,
+                  const = Some(0),
+                  rd = Some(rd),
+                  opc = GenericOpcode.LD_B
+                )
+              })
+              insnCount += 1
+            }
+            case x if 110 until 115 contains x => {
+              // ST_W
+              caseCount.update("ST_W", caseCount("ST_W") + 1)
+              val rs1 = Random.nextInt(mspec.numArchitecturalRegs)
+              val mask = (wordMask >> 2) << 2
+              val addr = mirror(rs1) & mask
               mirror.update(rs1, addr)
               if (!expectingException) {
                 expectedWritebackLog += ((rs1, addr))
@@ -638,7 +700,7 @@ class TestBackendPipeline extends AnyFunSuite {
               )
               if (printInsn)
                 println(
-                  "request store: r" + rs1 + "(" + addr
+                  "st_w: r" + rs1 + "(" + addr
                     .hexString() + ") <- mem[r" + rs2 + "], data: " + mirror(
                     rs2
                   )
@@ -652,7 +714,7 @@ class TestBackendPipeline extends AnyFunSuite {
                   t = 0,
                   rs1 = Some(rs1),
                   rs2 = None,
-                  const = Some(wordMask),
+                  const = Some(mask),
                   rd = Some(rs1),
                   opc = GenericOpcode.AND
                 )
@@ -666,7 +728,69 @@ class TestBackendPipeline extends AnyFunSuite {
                   rs2 = Some(rs2),
                   const = Some(0),
                   rd = None,
-                  opc = GenericOpcode.ST
+                  opc = GenericOpcode.ST_W
+                )
+              })
+
+              insnCount += 1
+            }
+            case x if 115 until 120 contains x => {
+              // ST_B
+              caseCount.update("ST_B", caseCount("ST_B") + 1)
+              val rs1 = Random.nextInt(mspec.numArchitecturalRegs)
+              val mask = wordMask
+              val addr = mirror(rs1) & mask
+              mirror.update(rs1, addr)
+              if (!expectingException) {
+                expectedWritebackLog += ((rs1, addr))
+              }
+
+              // Read rs2 after updating rs1, in case rs1 == rs2.
+              val rs2 = Random.nextInt(mspec.numArchitecturalRegs)
+              val wordIndex = (addr / (mspec.dataWidth.value / 8)).toInt
+              val byteIndex = addr & ((mspec.dataWidth.value / 8) - 1)
+              val newValue = BigInt(
+                memMirror(wordIndex).toByteArray.toSeq.reverse
+                  .padTo(4, 0.toByte)
+                  .updated(byteIndex.toInt, mirror(rs2).toByte)
+                  .reverse
+                  .toArray
+              )
+              memMirror.update(
+                wordIndex,
+                newValue
+              )
+              if (printInsn)
+                println(
+                  "st_b: r" + rs1 + "(" + addr
+                    .hexString() + ") <- r" + rs2 + ", data: " + mirror(
+                    rs2
+                  ).toByte
+                    .hexString()
+                )
+
+              // mask
+              writeIt(p => {
+                MockPayload.create(
+                  p,
+                  t = 0,
+                  rs1 = Some(rs1),
+                  rs2 = None,
+                  const = Some(mask),
+                  rd = Some(rs1),
+                  opc = GenericOpcode.AND
+                )
+              })
+
+              writeIt(p => {
+                MockPayload.create(
+                  p,
+                  t = 4,
+                  rs1 = Some(rs1),
+                  rs2 = Some(rs2),
+                  const = Some(0),
+                  rd = None,
+                  opc = GenericOpcode.ST_B
                 )
               })
 

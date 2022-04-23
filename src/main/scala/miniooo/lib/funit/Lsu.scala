@@ -13,11 +13,17 @@ case class LsuConfig(
     storeBufferSize: Int = 16
 )
 
+object LsuOperationSize extends SpinalEnum(binarySequential) {
+  val BYTE, HALF, WORD = newElement()
+}
+
 case class LsuOperation() extends Bundle with PolymorphicDataChain {
+  private val spec = Machine.get[MachineSpec]
   def parentObjects = Seq()
 
   val isStore = Bool()
   val offset = SInt(32 bits)
+  val size = LsuOperationSize()
 }
 
 trait LsuInstance extends FunctionUnitInstance {
@@ -27,6 +33,16 @@ trait LsuInstance extends FunctionUnitInstance {
 class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
   def staticTag: Data = staticTagData
   private val spec = Machine.get[MachineSpec]
+
+  val byteOffsetWidth = log2Up(spec.dataWidth.value / 8) bits
+  val storeBufferKeyWidth = (spec.dataWidth.value - byteOffsetWidth.value) bits
+  val storeBufferKeyType = HardType(Bits(storeBufferKeyWidth))
+  val strbWidth = (spec.dataWidth.value / 8) bits
+  val strbType = HardType(Bits(strbWidth))
+
+  def getStoreBufferKeyForAddr(addr: Bits): Bits = {
+    addr(spec.dataWidth.value - 1 downto byteOffsetWidth.value)
+  }
 
   private var effInst: EffectInstance = null
 
@@ -55,12 +71,17 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
   case class PendingStore() extends Bundle {
     val addr = spec.dataType
     val data = spec.dataType
-    val strb = Bits((spec.dataWidth.value / 8) bits)
+    val strb = strbType()
+  }
+
+  case class OooLoadContext() extends Bundle {
+    val strb = strbType()
+    val shift = UInt(byteOffsetWidth)
   }
 
   case class StoreBufferEntry() extends Bundle {
     val valid = Bool()
-    val addr = spec.dataType
+    val key = storeBufferKeyType()
     val srcRobIndex = spec.robEntryIndexType()
   }
 
@@ -68,7 +89,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
     def idle: StoreBufferEntry = {
       val ret = StoreBufferEntry()
       ret.valid := False
-      ret.addr.assignDontCare()
+      ret.key.assignDontCare()
       ret.srcRobIndex.assignDontCare()
       ret
     }
@@ -80,6 +101,32 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
     val strb = Bits((spec.dataWidth.value / 8) bits)
     val isStore = Bool()
     val token = CommitToken()
+
+    def setStrbFromSize(size: SpinalEnumCraft[LsuOperationSize.type]): Unit = {
+      val baseStrb = size.mux(
+        LsuOperationSize.BYTE -> B(0x1, strb.getWidth bits),
+        LsuOperationSize.HALF -> B(0x3, strb.getWidth bits),
+        LsuOperationSize.WORD -> B(0xf, strb.getWidth bits)
+      )
+      val shift = addr(byteOffsetWidth.value - 1 downto 0).asUInt
+      strb := (baseStrb << shift).resized
+    }
+  }
+
+  def strbToWordMask(strb: Bits): Bits = {
+    val bits = Vec(
+      strb.as(Vec(Bool(), strb.getWidth)).flatMap(x => (0 until 8).map(_ => x))
+    )
+    bits.asBits
+  }
+
+  def convertLoadOutputToRegValue(
+      data: Bits,
+      strb: Bits,
+      byteShift: UInt
+  ): Bits = {
+    val x = (data & strbToWordMask(strb)) >> (byteShift << 3)
+    x
   }
 
   override def generate(
@@ -110,6 +157,8 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
       axiM.b << io_axiMaster.b
 
       val pendingStores = Mem(PendingStore(), spec.robSize)
+
+      val oooLoadContexts = Mem(OooLoadContext(), spec.robSize)
 
       // Effects are "posted" after commit - don't reset it.
       val effFifo = MultiLaneFifo(
@@ -174,7 +223,8 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         allocIndex.assignDontCare()
         val firstReplace = storeBuffer.zipWithIndex.firstWhere(
           hardType = indexType(),
-          predicate = x => x._1.valid && x._1.addr === addr,
+          predicate =
+            x => x._1.valid && x._1.key === getStoreBufferKeyForAddr(addr),
           generate = x => U(x._2, allocIndex.getWidth bits)
         )
         val firstEmpty = storeBuffer.zipWithIndex.firstWhere(
@@ -189,6 +239,12 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
           allocIndex := firstEmpty._2
         }
         allocOk := firstReplace._1 || firstEmpty._1
+      }
+
+      val pendingStoresUtil = new Area {
+        val srcRobIndexAtFirstReplace =
+          storeBuffer(storeBufferAllocLogic.firstReplace._2).srcRobIndex
+        val storeAtFirstReplace = pendingStores(srcRobIndexAtFirstReplace)
       }
 
       // This logic block may invalidate a `storeBuffer` entry. So, this logic needs to be
@@ -227,9 +283,11 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               "invalid store buffer index in effect stage"
             )
             assert(
-              storeBuffer(storeBufferIndex._2).addr === pendingStores(
-                robIndex
-              ).addr,
+              storeBuffer(storeBufferIndex._2).key === getStoreBufferKeyForAddr(
+                pendingStores(
+                  robIndex
+                ).addr
+              ),
               "store address mismatch"
             )
             storeBuffer(storeBufferIndex._2).valid := False
@@ -245,9 +303,11 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
 
         val req = LsuReq()
         req.addr := (issue.srcRegData(0).asSInt + op.offset.resized).asBits
-        req.data := issue.srcRegData(1)
+        req.data := (issue.srcRegData(1) << (req
+          .addr(byteOffsetWidth.value - 1 downto 0)
+          .asUInt << 3)).resized
         req.isStore := op.isStore
-        req.strb := ~B(0, req.strb.getWidth bits)
+        req.setStrbFromSize(op.size)
         req.token := in.lookup[CommitToken]
         val out = io_input.translateWith(req).pipelined(m2s = true, s2m = true)
       }
@@ -284,7 +344,11 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
             commitReq.regWriteValue.assignDontCare()
             commitReq.token := req.payload.token
 
-            val ok = previousStoreCompleted && storeBufferAllocLogic.allocOk
+            val byteRangeConflict =
+              storeBufferAllocLogic.firstReplace._1 && pendingStoresUtil.storeAtFirstReplace.strb =/= req.payload.strb
+
+            val ok =
+              previousStoreCompleted && storeBufferAllocLogic.allocOk && !byteRangeConflict
             outStream_pipeline.valid := ok
             outStream_pipeline.payload := commitReq
             req.ready := ok && outStream_pipeline.ready
@@ -316,14 +380,14 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               val bufEntry = StoreBufferEntry()
               bufEntry.valid := True
               bufEntry.srcRobIndex := req.payload.token.robIndex
-              bufEntry.addr := req.payload.addr
+              bufEntry.key := getStoreBufferKeyForAddr(req.payload.addr)
 
               assert(
                 !storeBuffer(
                   storeBufferAllocLogic.allocIndex
                 ).valid || storeBuffer(
                   storeBufferAllocLogic.allocIndex
-                ).addr === req.payload.addr,
+                ).key === getStoreBufferKeyForAddr(req.payload.addr),
                 "invalid allocated store buffer index"
               )
               storeBuffer(
@@ -354,43 +418,55 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
             assert(
               !found || storeBuffer(
                 storeBufferAllocLogic.firstReplace._2
-              ).addr === req.payload.addr,
+              ).key === getStoreBufferKeyForAddr(req.payload.addr),
               "invalid store buffer index for load operation"
             )
-            val srcRobIndex =
-              storeBuffer(storeBufferAllocLogic.firstReplace._2).srcRobIndex
             assert(
-              !found || pendingStoreValid(srcRobIndex),
+              !found || pendingStoreValid(
+                pendingStoresUtil.srcRobIndexAtFirstReplace
+              ),
               "load operation got invalid src rob index"
             )
-            val store = pendingStores(srcRobIndex)
+            val store = pendingStoresUtil.storeAtFirstReplace
             val ok = found && store.strb === req.payload.strb
 
             val commitReq = CommitRequest(null)
             commitReq.exception := MachineException.idle
-            commitReq.regWriteValue(0) := store.data
+
+            val storeData = convertLoadOutputToRegValue(
+              store.data,
+              req.payload.strb,
+              req.payload
+                .addr(byteOffsetWidth.value - 1 downto 0)
+                .asUInt
+            )
+            commitReq.regWriteValue(0) := storeData
             commitReq.token := req.payload.token
 
             outStream_pipeline.valid := ok
             outStream_pipeline.payload := commitReq
 
-            // TODO: Block the pipeline on strb mismatch
-            when(ok) {
-              // Store buffer bypass ok
-              req.ready := outStream_pipeline.ready
-              when(req.ready) {
-                Machine.report(
-                  Seq(
-                    "load bypass ok - addr=",
-                    req.payload.addr.asUInt,
-                    " data=",
-                    store.data,
-                    " robIndex=",
-                    req.payload.token.robIndex,
-                    " epoch=",
-                    req.payload.token.epoch
+            when(found) {
+              when(ok) {
+                // Store buffer bypass ok
+                req.ready := outStream_pipeline.ready
+                when(req.ready) {
+                  Machine.report(
+                    Seq(
+                      "load bypass ok - addr=",
+                      req.payload.addr.asUInt,
+                      " data=",
+                      storeData,
+                      " robIndex=",
+                      req.payload.token.robIndex,
+                      " epoch=",
+                      req.payload.token.epoch
+                    )
                   )
-                )
+                }
+              } otherwise {
+                // strb mismatch - wait
+                req.ready := False
               }
             } otherwise {
               // OoO memory read issue
@@ -400,6 +476,16 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               axiM.ar.valid := True
               axiM.ar.payload := ar
               req.ready := axiM.ar.ready
+
+              val ctx = OooLoadContext()
+              ctx.strb := req.payload.strb
+              ctx.shift := req.payload.addr.asUInt.resized
+
+              oooLoadContexts.write(
+                address = req.payload.token.robIndex,
+                data = ctx
+              )
+
               when(req.ready) {
                 Machine.report(
                   Seq(
@@ -482,7 +568,12 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         commitReq.token.robIndex := axiM.r.payload.id(
           spec.robEntryIndexWidth.value - 1 downto 0
         )
-        commitReq.regWriteValue(0) := axiM.r.payload.data
+
+        val ctx = oooLoadContexts(commitReq.token.robIndex)
+        val data =
+          convertLoadOutputToRegValue(axiM.r.payload.data, ctx.strb, ctx.shift)
+        commitReq.regWriteValue(0) := data // TODO: Sign extension
+
         axiM.r.translateWith(commitReq) >> outStream_oooRead
         when(outStream_oooRead.fire) {
           Machine.report(
