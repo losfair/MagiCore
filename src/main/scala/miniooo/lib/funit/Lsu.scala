@@ -21,6 +21,7 @@ case class LsuOperation() extends Bundle with PolymorphicDataChain {
   private val spec = Machine.get[MachineSpec]
   def parentObjects = Seq()
 
+  val isFence = Bool()
   val isStore = Bool()
   val offset = SInt(32 bits)
   val size = LsuOperationSize()
@@ -99,6 +100,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
     val addr = spec.dataType
     val data = spec.dataType
     val strb = Bits((spec.dataWidth.value / 8) bits)
+    val isFence = Bool()
     val isStore = Bool()
     val token = CommitToken()
 
@@ -306,6 +308,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         req.data := (issue.srcRegData(1) << (req
           .addr(byteOffsetWidth.value - 1 downto 0)
           .asUInt << 3)).resized
+        req.isFence := op.isFence
         req.isStore := op.isStore
         req.setStrbFromSize(op.size)
         req.token := in.lookup[CommitToken]
@@ -332,7 +335,18 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         axiM.ar.setIdle()
 
         when(req.valid) {
-          when(req.payload.isStore) {
+          when(req.payload.isFence) {
+            // FENCE path
+            val commitReq = CommitRequest(null)
+            commitReq.exception := MachineException.idle
+            commitReq.regWriteValue.assignDontCare()
+            commitReq.token := req.payload.token
+
+            val ok = !pendingStoreValid.orR
+            req.ready := ok && outStream_pipeline.ready
+            outStream_pipeline.valid := ok
+            outStream_pipeline.payload := commitReq
+          } elsewhen (req.payload.isStore) {
             // STORE path
             // Wait for the previous store to complete
             val previousStoreCompleted = !pendingStoreValid(

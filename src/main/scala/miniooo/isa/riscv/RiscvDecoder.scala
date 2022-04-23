@@ -137,6 +137,7 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
     } else if (ctag == classTag[LsuOperation]) {
       val x = LsuOperation()
       x.isStore := fetch.insn(5)
+      x.isFence := False
       x.offset := ImmType.interpret(immType, fetch.insn)._2.asSInt
       x.size := fetch
         .insn(13 downto 12)

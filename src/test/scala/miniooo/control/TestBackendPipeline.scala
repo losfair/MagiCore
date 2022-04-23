@@ -57,7 +57,7 @@ class TestBackendPipeline extends AnyFunSuite {
 
   object GenericOpcode extends SpinalEnum(binarySequential) {
     val ADD, SUB, AND, OR, XOR, MOV, DIV_S, DIV_U, REM_S, REM_U, LD_B, LD_H,
-        LD_W, ST_B, ST_H, ST_W, BLTU, BGE, BEQ =
+        LD_W, ST_B, ST_H, ST_W, MFENCE, BLTU, BGE, BEQ =
       newElement()
 
     def translateToAlu(
@@ -124,6 +124,7 @@ class TestBackendPipeline extends AnyFunSuite {
         Some(op.asInstanceOf[T])
       } else if (ctag == classTag[LsuOperation]) {
         val op = LsuOperation()
+        op.isFence := opc === GenericOpcode.MFENCE
         op.isStore := opc === GenericOpcode.ST_B || opc === GenericOpcode.ST_H || opc === GenericOpcode.ST_W
         op.size := opc.mux(
           GenericOpcode.ST_B -> LsuOperationSize.BYTE.craft(),
@@ -350,6 +351,7 @@ class TestBackendPipeline extends AnyFunSuite {
         caseCount.update("ST_B", 0)
         caseCount.update("BR_HIT", 0)
         caseCount.update("BR_MISS", 0)
+        caseCount.update("MFENCE", 0)
 
         val testSize = 200000
         var writebackCount = 0
@@ -460,7 +462,7 @@ class TestBackendPipeline extends AnyFunSuite {
             delayCount += thisDelay
             dut.clockDomain.waitSampling(thisDelay)
           }
-          val op = Random.nextInt(121)
+          val op = Random.nextInt(125)
           op match {
             case x if 0 until 10 contains x =>
               // LD_CONST
@@ -842,6 +844,25 @@ class TestBackendPipeline extends AnyFunSuite {
                   rd = None,
                   opc = GenericOpcode.BLTU,
                   predictedBranch = predicted
+                )
+              })
+            }
+            case x if 121 until 125 contains x => {
+              // MFENCE
+
+              if (printInsn)
+                println("mfence")
+
+              caseCount.update("MFENCE", caseCount("MFENCE") + 1)
+              writeIt(p => {
+                MockPayload.create(
+                  p,
+                  t = 4,
+                  rs1 = None,
+                  rs2 = None,
+                  const = None,
+                  rd = None,
+                  opc = GenericOpcode.MFENCE
                 )
               })
             }
