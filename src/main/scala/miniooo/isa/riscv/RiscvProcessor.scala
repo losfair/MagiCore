@@ -9,7 +9,7 @@ import miniooo.frontend._
 import miniooo.lib.funit._
 import spinal.lib.bus.amba4.axi._
 
-case class RiscvProcessor(resetPc: BigInt = 0x0, debug: Boolean = false) extends Component {
+case class RiscvProcessor(resetPc: BigInt = 0x0, debug: Boolean = false, normalizePorts: Boolean = false) extends Component {
   object FuTag extends SpinalEnum(binarySequential) {
     val ALU, LSU, MUL, DIV, EARLY_EXC = newElement()
   }
@@ -99,7 +99,7 @@ object RiscvProcessorSyncReset {
 
   def main(args: Array[String]) {
     SyncResetSpinalConfig.generateVerilog(Machine.build {
-      new RiscvProcessor(resetPc = 0x0)
+      new RiscvProcessor(resetPc = 0x08000000, debug = true)
     })
   }
 }
