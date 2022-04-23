@@ -11,6 +11,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 import miniooo.testutil.TestExt._
 import scala.collection.mutable
+import miniooo.testutil.TestSyncResetSpinalConfig
 
 class TestIssue extends AnyFunSuite {
   val mspec = MachineSpec(
@@ -152,7 +153,9 @@ class TestIssue extends AnyFunSuite {
     }
   }
   test("TestIssue") {
-    SimConfig.withWave.doSim(
+    SimConfig
+      .withConfig(TestSyncResetSpinalConfig)
+      .withWave.doSim(
       rtl = Machine.build { new IssueTop() }
     ) { dut =>
       def genRegWriteReq(
