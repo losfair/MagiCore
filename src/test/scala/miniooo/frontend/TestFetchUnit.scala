@@ -75,7 +75,6 @@ class TestFetchUnit extends AnyFunSuite {
     Machine.provide(exc.exc)
 
     val fetch = FetchUnit()
-    fetch.io.flush := False
 
     val brInfo = BranchInfoFeedback()
     brInfo.isUnconditionalStaticBranch := False
