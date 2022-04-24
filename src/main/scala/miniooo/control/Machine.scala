@@ -46,6 +46,7 @@ object Machine {
 
   def provide[T: ClassTag](value: T) = current.provide(value)
   def get[T: ClassTag]: T = current.get[T]
+  def tryGet[T: ClassTag]: Option[T] = current.tryGet[T]
 
   def build[T](f: => T): T = {
     assert(Machine._current.get() == null)
@@ -82,7 +83,9 @@ class Machine {
   def get[T: ClassTag]: T = {
     singletons.get(classTag[T]).get.asInstanceOf[T]
   }
-
+  def tryGet[T: ClassTag]: Option[T] = {
+    singletons.get(classTag[T]).map(x => x.asInstanceOf[T])
+  }
 }
 
 object MachineDebugMarker {}
@@ -98,6 +101,8 @@ case class MachineException() extends Bundle {
   def brDstAddr = context2
   def brIsConst = context3
   def brTaken = context4
+
+  def memoryError_accessAddr = context2
 
   def resetArea[T](f: => T): T = {
     new ResetArea(reset = valid, cumulative = true) {
@@ -139,7 +144,7 @@ object FullMachineException {
 }
 
 object MachineExceptionCode extends SpinalEnum(binarySequential) {
-  val BRANCH_MISS, INSN_CACHE_MISS, DECODE_ERROR, DIVIDE_ERROR, SERIALIZE = newElement()
+  val BRANCH_MISS, INSN_CACHE_MISS, DECODE_ERROR, DIVIDE_ERROR, SERIALIZE, MEMORY_ERROR, INSN_CACHE_FLUSH = newElement()
 
   def shouldSuppressWriteback(code: SpinalEnumCraft[MachineExceptionCode.type]): Bool = {
     code.mux(

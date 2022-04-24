@@ -16,7 +16,7 @@ case class RiscvProcessor(
     initBranchPredictionBuffers: Boolean = false
 ) extends Component {
   object FuTag extends SpinalEnum(binarySequential) {
-    val ALU, LSU, MUL, DIV, EARLY_EXC = newElement()
+    val ALU, LSU, MUL, DIV, EARLY_EXC, CSR = newElement()
   }
 
   val mspec = MachineSpec(
@@ -47,13 +47,17 @@ case class RiscvProcessor(
 
   if (debug) Machine.provide(MachineDebugMarker)
 
+  val csr = RvCsrFileReg()
+  csr.provide()
+
   val msem = new MachineSemantics {
     lazy val functionUnits: Seq[FunctionUnit] = Seq(
       new Alu(FuTag.ALU, AluConfig(alu32 = false)),
       new Multiplier(FuTag.MUL, MultiplierConfig()),
       new Divider(FuTag.DIV, enableException = true),
       new Lsu(FuTag.LSU, LsuConfig()),
-      new EarlyExcPassthrough(FuTag.EARLY_EXC)
+      new EarlyExcPassthrough(FuTag.EARLY_EXC),
+      new RvCsr(FuTag.CSR)
     )
   }
   Machine.provide(msem)
@@ -68,7 +72,8 @@ case class RiscvProcessor(
     earlyExceptionPort = FuTag.EARLY_EXC,
     lsuPort = FuTag.LSU,
     mulPort = FuTag.MUL,
-    divPort = FuTag.DIV
+    divPort = FuTag.DIV,
+    csrPort = FuTag.CSR
   )
   fetch.io.output >> decode.io.input
 
@@ -77,7 +82,6 @@ case class RiscvProcessor(
   }
 
   fetch.io.branchInfoFeedback := decode.io.branchInfoFeedback
-  fetch.io.flush := False
 
   val io = new Bundle {
     val writebackMonitor = out(
@@ -105,7 +109,11 @@ object RiscvProcessorSyncReset {
 
   def main(args: Array[String]) {
     SyncResetSpinalConfig.generateVerilog(Machine.build {
-      new RiscvProcessor(resetPc = 0x08000000, debug = false, initBranchPredictionBuffers = true)
+      new RiscvProcessor(
+        resetPc = 0x08000000,
+        debug = false,
+        initBranchPredictionBuffers = true
+      )
     })
   }
 }

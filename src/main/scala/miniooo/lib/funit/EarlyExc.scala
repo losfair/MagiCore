@@ -7,7 +7,7 @@ import miniooo.control._
 import miniooo.util.MultiLaneFifo
 
 object EarlyExceptionCode extends SpinalEnum(binarySequential) {
-  val DECODE_ERROR, CACHE_MISS, SERIALIZE =
+  val DECODE_ERROR, CACHE_MISS, SERIALIZE, INSN_CACHE_FLUSH =
     newElement()
 }
 
@@ -48,6 +48,9 @@ class EarlyExcPassthrough(staticTagData: => Data) extends FunctionUnit {
         }
         is(EarlyExceptionCode.SERIALIZE) {
           out.exception.code := MachineExceptionCode.SERIALIZE
+        }
+        is(EarlyExceptionCode.INSN_CACHE_FLUSH) {
+          out.exception.code := MachineExceptionCode.INSN_CACHE_FLUSH
         }
       }
 

@@ -98,11 +98,12 @@ case class FetchUnit() extends Area {
 
   val io = new Bundle {
     val memBus = icache.io.mem.toAxi4ReadOnly()
-    val flush = icache.io.flush
     val output = Stream(FetchPacket())
     val branchInfoFeedback = BranchInfoFeedback()
   }
   val exc = Machine.get[FullMachineException]
+
+  icache.io.flush := False
 
   val pcStream = Stream(FetchPacket())
   val speculatedGlobalHistory = Reg(fspec.globalHistoryType()) init (0)
@@ -403,6 +404,10 @@ case class FetchUnit() extends Area {
       } elsewhen (exc.exc.code === MachineExceptionCode.SERIALIZE) {
         Machine.report(Seq("Got serialization exception. Restarting at next pc."))
         pcStreamGen.pc.pc := nextPCforTheirFetchPacket
+      } elsewhen (exc.exc.code === MachineExceptionCode.INSN_CACHE_FLUSH) {
+        Machine.report(Seq("Requested ICache flush."))
+        pcStreamGen.pc.pc := nextPCforTheirFetchPacket
+        icache.io.flush := True
       } otherwise {
         Machine.report(Seq("Got exception - IFetch lockup."))
         pcStreamGen.valid := False

@@ -60,6 +60,8 @@ case class RobHeadInfo() extends Area {
   val headPtr = spec.robEntryIndexType()
 }
 
+case class DispatchPerfCounters(instRetired: UInt)
+
 case class DispatchUnit[T <: PolymorphicDataChain](
     dataType: HardType[T]
 ) extends Area {
@@ -374,6 +376,9 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           x._2.io_reset := reset
         })
 
+      var retireCount = UInt(log2Up(spec.commitWidth + 1) bits)
+      retireCount := 0
+
       for (i <- 0 until spec.commitWidth) {
         val entryData = readOutput(i)
         val localEmpty =
@@ -512,9 +517,14 @@ case class DispatchUnit[T <: PolymorphicDataChain](
                 })
           )
         }
+
+        retireCount = entryReady ? (retireCount + 1) | retireCount
       }
 
       renameIf.unit.cmt := cmtSnapshot
+      Machine
+        .tryGet[DispatchPerfCounters]
+        .foreach(x => x.instRetired := x.instRetired + retireCount.resized)
     }
   }
 }

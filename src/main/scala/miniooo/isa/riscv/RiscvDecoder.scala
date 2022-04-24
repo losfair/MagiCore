@@ -50,6 +50,7 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
   val rs1Valid = Bool()
   val rs2Valid = Bool()
   val rdValid = Bool()
+  val fenceI = Bool()
 
   val fuTag = mspec.functionUnitTagType()
   val immType = ImmType()
@@ -61,7 +62,8 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
 
     if (ctag == classTag[EarlyException]) {
       val x = EarlyException()
-      x.code := fetch.cacheMiss ? EarlyExceptionCode.CACHE_MISS | EarlyExceptionCode.DECODE_ERROR
+      x.code := fetch.cacheMiss ? EarlyExceptionCode.CACHE_MISS |
+        (fenceI ? EarlyExceptionCode.INSN_CACHE_FLUSH | EarlyExceptionCode.DECODE_ERROR)
       Some(x.asInstanceOf[T])
     } else if (ctag == classTag[DecodeInfo]) {
       val x = DecodeInfo(null)
@@ -166,7 +168,8 @@ case class RiscvDecoder(
     earlyExceptionPort: Data,
     lsuPort: Data,
     mulPort: Data,
-    divPort: Data
+    divPort: Data,
+    csrPort: Data
 ) extends Area {
   val E = RvEncoding
   // TODO: RVC
@@ -190,6 +193,7 @@ case class RiscvDecoder(
   out.rs1Valid := False
   out.rs2Valid := False
   out.rdValid := False
+  out.fenceI := False
 
   val outPatched = DecodePacket()
   outPatched.rs1Valid := out.rs1Valid && insn(E.rs1Range).asUInt =/= 0
@@ -287,6 +291,22 @@ case class RiscvDecoder(
     is(E.FENCE) {
       out.fuTag := lsuPort
       out.immType := ImmType.X
+    }
+    is(E.CSRRW, E.CSRRS, E.CSRRC) {
+      out.rdValid := True
+      out.rs1Valid := True
+      out.fuTag := csrPort
+      out.immType := ImmType.X
+    }
+    is(E.CSRRWI, E.CSRRSI, E.CSRRCI) {
+      out.rdValid := True
+      out.fuTag := csrPort
+      out.immType := ImmType.X
+    }
+    is(E.FENCEI) {
+      out.fuTag := earlyExceptionPort
+      out.immType := ImmType.X
+      out.fenceI := True
     }
     default {
       out.fuTag := earlyExceptionPort
