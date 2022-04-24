@@ -56,7 +56,7 @@ class TestBackendPipeline extends AnyFunSuite {
   }
 
   object GenericOpcode extends SpinalEnum(binarySequential) {
-    val ADD, SUB, AND, OR, XOR, MOV, DIV_S, DIV_U, REM_S, REM_U, LD_B, LD_H,
+    val ADD, SUB, AND, OR, XOR, MOV, DIV_S, DIV_U, REM_S, REM_U, LD_B_U, LD_B_S, LD_H_U, LD_H_S,
         LD_W, ST_B, ST_H, ST_W, MFENCE, BLTU, BGE, BEQ =
       newElement()
 
@@ -128,11 +128,14 @@ class TestBackendPipeline extends AnyFunSuite {
         op.isStore := opc === GenericOpcode.ST_B || opc === GenericOpcode.ST_H || opc === GenericOpcode.ST_W
         op.size := opc.mux(
           GenericOpcode.ST_B -> LsuOperationSize.BYTE.craft(),
-          GenericOpcode.LD_B -> LsuOperationSize.BYTE.craft(),
+          GenericOpcode.LD_B_U -> LsuOperationSize.BYTE.craft(),
+          GenericOpcode.LD_B_S -> LsuOperationSize.BYTE.craft(),
           GenericOpcode.ST_H -> LsuOperationSize.HALF.craft(),
-          GenericOpcode.LD_H -> LsuOperationSize.HALF.craft(),
+          GenericOpcode.LD_H_U -> LsuOperationSize.HALF.craft(),
+          GenericOpcode.LD_H_S -> LsuOperationSize.HALF.craft(),
           default -> LsuOperationSize.WORD.craft()
         )
+        op.signExt := opc === GenericOpcode.LD_B_S || opc === GenericOpcode.LD_H_S
         op.offset := const.asSInt
         Some(op.asInstanceOf[T])
       } else {
@@ -346,7 +349,8 @@ class TestBackendPipeline extends AnyFunSuite {
         caseCount.update("DIV_U", 0)
         caseCount.update("DUMMY_EFFECT", 0)
         caseCount.update("LD_W", 0)
-        caseCount.update("LD_B", 0)
+        caseCount.update("LD_B_U", 0)
+        caseCount.update("LD_B_S", 0)
         caseCount.update("ST_W", 0)
         caseCount.update("ST_B", 0)
         caseCount.update("BR_HIT", 0)
@@ -633,9 +637,9 @@ class TestBackendPipeline extends AnyFunSuite {
               })
               insnCount += 1
             }
-            case x if 105 until 110 contains x => {
-              // LD_B
-              caseCount.update("LD_B", caseCount("LD_B") + 1)
+            case x if 105 until 108 contains x => {
+              // LD_B_U
+              caseCount.update("LD_B_U", caseCount("LD_B_U") + 1)
               val rd = Random.nextInt(mspec.numArchitecturalRegs)
               val rs1 = Random.nextInt(mspec.numArchitecturalRegs)
 
@@ -653,7 +657,7 @@ class TestBackendPipeline extends AnyFunSuite {
               }
               if (printInsn)
                 println(
-                  "ld_b: r" + rs1 + "(" + addr
+                  "ld_b_u: r" + rs1 + "(" + addr
                     .hexString() + ") -> r" + rd + ", data: " + data.hexString()
                 )
 
@@ -678,7 +682,58 @@ class TestBackendPipeline extends AnyFunSuite {
                   rs2 = None,
                   const = Some(0),
                   rd = Some(rd),
-                  opc = GenericOpcode.LD_B
+                  opc = GenericOpcode.LD_B_U
+                )
+              })
+              insnCount += 1
+            }
+            case x if 108 until 110 contains x => {
+              // LD_B_S
+              caseCount.update("LD_B_S", caseCount("LD_B_S") + 1)
+              val rd = Random.nextInt(mspec.numArchitecturalRegs)
+              val rs1 = Random.nextInt(mspec.numArchitecturalRegs)
+
+              val mask = wordMask
+
+              val addr = mirror(rs1) & mask
+              val bitShift = (addr & ((mspec.dataWidth.value / 8) - 1)) * 8
+              val data_ = (memMirror(
+                (addr / (mspec.dataWidth.value / 8)).toInt
+              ) >> bitShift.toInt) & 0xff
+              val data = if((data_ >> 7) == 0) data_ else (data_ | 0xffffff00L)
+              mirror.update(rd, data)
+              if (!expectingException) {
+                expectedWritebackLog += ((rd, addr))
+                expectedWritebackLog += ((rd, mirror(rd)))
+              }
+              if (printInsn)
+                println(
+                  "ld_b_s: r" + rs1 + "(" + addr
+                    .hexString() + ") -> r" + rd + ", data: " + data.hexString()
+                )
+
+              // mask
+              writeIt(p => {
+                MockPayload.create(
+                  p,
+                  t = 0,
+                  rs1 = Some(rs1),
+                  rs2 = None,
+                  const = Some(mask),
+                  rd = Some(rd),
+                  opc = GenericOpcode.AND
+                )
+              })
+
+              writeIt(p => {
+                MockPayload.create(
+                  p,
+                  t = 4,
+                  rs1 = Some(rd),
+                  rs2 = None,
+                  const = Some(0),
+                  rd = Some(rd),
+                  opc = GenericOpcode.LD_B_S
                 )
               })
               insnCount += 1

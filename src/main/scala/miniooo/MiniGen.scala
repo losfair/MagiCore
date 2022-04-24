@@ -95,6 +95,7 @@ class MiniGen extends Component {
         op.isFence := False
         op.size := LsuOperationSize.WORD
         op.offset := const.asSInt
+        op.signExt := False
         Some(op.asInstanceOf[T])
       } else {
         None

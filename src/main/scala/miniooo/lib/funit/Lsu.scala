@@ -25,6 +25,7 @@ case class LsuOperation() extends Bundle with PolymorphicDataChain {
   val isStore = Bool()
   val offset = SInt(32 bits)
   val size = LsuOperationSize()
+  val signExt = Bool()
 }
 
 trait LsuInstance extends FunctionUnitInstance {
@@ -78,6 +79,8 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
   case class OooLoadContext() extends Bundle {
     val strb = strbType()
     val shift = UInt(byteOffsetWidth)
+    val size = LsuOperationSize()
+    val signExt = Bool()
   }
 
   case class StoreBufferEntry() extends Bundle {
@@ -103,6 +106,8 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
     val isFence = Bool()
     val isStore = Bool()
     val token = CommitToken()
+    val size = LsuOperationSize()
+    val signExt = Bool()
 
     def setStrbFromSize(size: SpinalEnumCraft[LsuOperationSize.type]): Unit = {
       val baseStrb = size.mux(
@@ -125,10 +130,28 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
   def convertLoadOutputToRegValue(
       data: Bits,
       strb: Bits,
-      byteShift: UInt
+      byteShift: UInt,
+      size: SpinalEnumCraft[LsuOperationSize.type],
+      signExt: Bool
   ): Bits = {
     val x = (data & strbToWordMask(strb)) >> (byteShift << 3)
-    x
+    val out = Bits(x.getWidth bits)
+    when(signExt) {
+      switch(size) {
+        is(LsuOperationSize.BYTE) {
+          out := x(7 downto 0).asSInt.resize(x.getWidth bits).asBits
+        }
+        is(LsuOperationSize.HALF) {
+          out := x(15 downto 0).asSInt.resize(x.getWidth bits).asBits
+        }
+        default {
+          out := x
+        }
+      }
+    } otherwise {
+      out := x
+    }
+    out
   }
 
   override def generate(
@@ -310,6 +333,8 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
           .asUInt << 3)).resized
         req.isFence := op.isFence
         req.isStore := op.isStore
+        req.size := op.size
+        req.signExt := op.signExt
         req.setStrbFromSize(op.size)
         req.token := in.lookup[CommitToken]
         val out = io_input.translateWith(req).pipelined(m2s = true, s2m = true)
@@ -452,7 +477,9 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               req.payload.strb,
               req.payload
                 .addr(byteOffsetWidth.value - 1 downto 0)
-                .asUInt
+                .asUInt,
+              req.payload.size,
+              req.payload.signExt
             )
             commitReq.regWriteValue(0) := storeData
             commitReq.token := req.payload.token
@@ -494,6 +521,8 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               val ctx = OooLoadContext()
               ctx.strb := req.payload.strb
               ctx.shift := req.payload.addr.asUInt.resized
+              ctx.size := req.payload.size
+              ctx.signExt := req.payload.signExt
 
               oooLoadContexts.write(
                 address = req.payload.token.robIndex,
@@ -585,7 +614,13 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
 
         val ctx = oooLoadContexts(commitReq.token.robIndex)
         val data =
-          convertLoadOutputToRegValue(axiM.r.payload.data, ctx.strb, ctx.shift)
+          convertLoadOutputToRegValue(
+            axiM.r.payload.data,
+            ctx.strb,
+            ctx.shift,
+            ctx.size,
+            ctx.signExt
+          )
         commitReq.regWriteValue(0) := data // TODO: Sign extension
 
         axiM.r.translateWith(commitReq) >> outStream_oooRead
