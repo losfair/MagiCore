@@ -43,7 +43,8 @@ case class IssuePort[T <: Data](hardType: HardType[T])
 case class IssueSpec(
     staticTag: Data,
     fastWakeup: Boolean = false,
-    warnOnBlockedIssue: Boolean
+    warnOnBlockedIssue: Boolean,
+    inOrder_sideEffect: Boolean
 )
 
 case class IssueQueue[T <: PolymorphicDataChain](
@@ -386,7 +387,7 @@ case class IssueUnit[T <: PolymorphicDataChain](
 
     val unifiedIssuePort = Stream(issueDataType)
     unifiedIssuePort.setBlocked()
-    unifiedIssuePort.valid := issueRequest.valid
+    unifiedIssuePort.valid := issueRequest.valid && !reset
     issueRequest.ready := unifiedIssuePort.ready
     unifiedIssuePort.payload.srcRegData := Vec(
       srcRegContent.zipWithIndex.map { case (x, i) =>

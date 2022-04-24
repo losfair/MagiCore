@@ -55,6 +55,11 @@ case class RobEntry(hardType: HardType[_ <: PolymorphicDataChain])
 
 case class FullCommitRequestType(ty: HardType[CommitRequest])
 
+case class RobHeadInfo() extends Area {
+  private val spec = Machine.get[MachineSpec]
+  val headPtr = spec.robEntryIndexType()
+}
+
 case class DispatchUnit[T <: PolymorphicDataChain](
     dataType: HardType[T]
 ) extends Area {
@@ -116,6 +121,11 @@ case class DispatchUnit[T <: PolymorphicDataChain](
       val pushPtr = Reg(spec.robEntryIndexType()) init (0)
       val popPtr = Reg(spec.robEntryIndexType()) init (0)
     }
+
+    val headInfo = RobHeadInfo()
+    headInfo.headPtr := resetArea.popPtr
+    Machine.provide(headInfo)
+
     val risingOccupancy = resetArea.risingOccupancy
     val pushPtr = resetArea.pushPtr
     val popPtr = resetArea.popPtr

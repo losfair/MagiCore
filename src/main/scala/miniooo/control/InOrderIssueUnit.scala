@@ -59,8 +59,12 @@ case class InOrderIssueUnit[T <: PolymorphicDataChain](
 
   issuePort.data := front.data
 
+  // The `!reset` condition is necessary for correctness, because at this point `robHead` will no longer
+  // be written back
   val popStream =
-    resetArea.q.io.pop.continueWhen(dataReady).translateWith(issuePort)
+    resetArea.q.io.pop
+      .continueWhen(dataReady && !reset)
+      .translateWith(issuePort)
   popStream.setBlocked()
 
   val issueOk = Vec(Bool(), io.issuePorts.size)
@@ -72,9 +76,13 @@ case class InOrderIssueUnit[T <: PolymorphicDataChain](
     fu.valid := False
     fu.payload := popStream.payload
 
-    when(
-      decodeInfo.functionUnitTag === c.portSpecs(fuIndex).staticTag
-    ) {
+    var cond = decodeInfo.functionUnitTag === c.portSpecs(fuIndex).staticTag
+    if (c.portSpecs(fuIndex).inOrder_sideEffect) {
+      val robHead = Machine.get[RobHeadInfo]
+      cond = cond && dispatchInfo.robIndex === robHead.headPtr
+    }
+
+    when(cond) {
       issueFuIndex := fuIndex
       fu.valid := popStream.valid
       popStream.ready := fu.ready
@@ -83,7 +91,7 @@ case class InOrderIssueUnit[T <: PolymorphicDataChain](
   }
 
   when(popStream.valid) {
-    assert(issueOk.countForVerification(x => x) === 1, "issue count mismatch")
+    assert(issueOk.countForVerification(x => x) <= 1, "issue count mismatch")
   }
   io.issueMonitor << popStream.asFlow.throwWhen(
     !popStream.ready

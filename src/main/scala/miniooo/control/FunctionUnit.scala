@@ -23,6 +23,7 @@ trait FunctionUnit {
   def staticTag: Data
   def warnOnBlockedIssue: Boolean = false
   def inOrder: Boolean = false
+  def inOrder_sideEffect: Boolean = false
   def isAlu: Boolean =
     false // The ALU receives special treatment for low-latency issueing.
   def generate(

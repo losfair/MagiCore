@@ -50,15 +50,17 @@ class TestBackendPipeline extends AnyFunSuite {
       new Alu(TestTag.static(0), AluConfig(alu32 = false)),
       new Multiplier(TestTag.static(1), MultiplierConfig()),
       new Divider(TestTag.static(2)),
-      new DummyEffect(TestTag.static(3)),
+      new DummyEffect(TestTag.static(3), false),
       new Lsu(TestTag.static(4), LsuConfig()),
-      new EarlyExcPassthrough(TestTag.static(5))
+      new EarlyExcPassthrough(TestTag.static(5)),
+      new DummyEffect(TestTag.static(6), true)
     )
   }
 
   object GenericOpcode extends SpinalEnum(binarySequential) {
     val ADD, SUB, AND, OR, XOR, MOV, DIV_S, DIV_U, REM_S, REM_U, LD_B_U, LD_B_S,
-        LD_H_U, LD_H_S, LD_W, ST_B, ST_H, ST_W, MFENCE, BLTU, BGE, BEQ, SERIALIZE =
+        LD_H_U, LD_H_S, LD_W, ST_B, ST_H, ST_W, MFENCE, BLTU, BGE, BEQ,
+        SERIALIZE =
       newElement()
 
     def translateToAlu(
@@ -208,7 +210,7 @@ class TestBackendPipeline extends AnyFunSuite {
         )
       )
       val cycles = out(UInt(64 bits))
-      val effectOutput = out(Flow(UInt(32 bits)))
+      val effectOutput = out(Vec(Flow(UInt(32 bits)), 2))
       val memBus = slave(Axi4Shared(lsu.io_axiMaster.config))
       val backendReset = out(Bool())
     }
@@ -222,9 +224,11 @@ class TestBackendPipeline extends AnyFunSuite {
     val cycles = Reg(UInt(64 bits)) init (0)
     cycles := cycles + 1
 
-    io.effectOutput := pipeline
-      .lookupFunctionUnitInstancesByType(classOf[DummyEffectInstance])(0)
-      .effectOutput
+    io.effectOutput := Vec(
+      pipeline
+        .lookupFunctionUnitInstancesByType(classOf[DummyEffectInstance])
+        .map(x => x.effectOutput)
+    )
 
     io.cycles := cycles
 
@@ -365,6 +369,7 @@ class TestBackendPipeline extends AnyFunSuite {
         caseCount.update("BR_MISS", 0)
         caseCount.update("MFENCE", 0)
         caseCount.update("SERIALIZE", 0)
+        caseCount.update("DUMMY_EFFECT_IN_ORDER_EFFECT", 0)
 
         val testSize = 200000
         var writebackCount = 0
@@ -409,14 +414,17 @@ class TestBackendPipeline extends AnyFunSuite {
         }
 
         // Watch effect
-        var nextDummyEffectValue = 0
+        var nextDummyEffectValue =
+          (0 until dut.io.effectOutput.size).map(_ => 0).to[ArrayBuffer]
         fork {
           while (true) {
             dut.clockDomain.waitSampling()
-            if (dut.io.effectOutput.valid.toBoolean) {
-              val value = dut.io.effectOutput.payload.toBigInt
-              assert(value == nextDummyEffectValue)
-              nextDummyEffectValue += 1
+            for ((expected, i) <- nextDummyEffectValue.zipWithIndex) {
+              if (dut.io.effectOutput(i).valid.toBoolean) {
+                val value = dut.io.effectOutput(i).payload.toBigInt
+                assert(value == expected)
+                nextDummyEffectValue.update(i, expected + 1)
+              }
             }
           }
         }
@@ -425,8 +433,10 @@ class TestBackendPipeline extends AnyFunSuite {
 
         val startCycles = dut.io.cycles.toBigInt
         var delayCount = 0
-        var dummyEffectSeq = 0
-        var dummyEffectSeq_excSnapshot = 0
+        var dummyEffectSeq_wbEffect = 0
+        var dummyEffectSeq_wbEffect_excSnapshot = 0
+        var dummyEffectSeq_inOrderEffect = 0
+        var dummyEffectSeq_inOrderEffect_excSnapshot = 0
         val printInsn = debug
         var exceptionPending = false
 
@@ -448,7 +458,9 @@ class TestBackendPipeline extends AnyFunSuite {
             mirror = mirror_excSnapshot
             insnCount = insnCount_excSnapshot
             exceptionPending = false
-            dummyEffectSeq = dummyEffectSeq_excSnapshot
+            dummyEffectSeq_wbEffect = dummyEffectSeq_wbEffect_excSnapshot
+            dummyEffectSeq_inOrderEffect =
+              dummyEffectSeq_inOrderEffect_excSnapshot
             if (printInsn) println("---- discarded range end ---")
           }
         }
@@ -474,7 +486,9 @@ class TestBackendPipeline extends AnyFunSuite {
             memMirror_excSnapshot = memMirror.toSeq.to[ArrayBuffer]
             mirror_excSnapshot = mirror.toSeq.to[ArrayBuffer]
             insnCount_excSnapshot = insnCount
-            dummyEffectSeq_excSnapshot = dummyEffectSeq
+            dummyEffectSeq_wbEffect_excSnapshot = dummyEffectSeq_wbEffect
+            dummyEffectSeq_inOrderEffect_excSnapshot =
+              dummyEffectSeq_inOrderEffect
             if (printInsn) println("---- discarded range start ---")
           }
         }
@@ -577,7 +591,7 @@ class TestBackendPipeline extends AnyFunSuite {
                 )
               })
             }
-            case x if 92 until 100 contains x => {
+            case x if 92 until 96 contains x => {
               // DUMMY_EFFECT
               caseCount.update("DUMMY_EFFECT", caseCount("DUMMY_EFFECT") + 1)
               val rd =
@@ -596,7 +610,7 @@ class TestBackendPipeline extends AnyFunSuite {
               }
               if (printInsn)
                 println(
-                  "dummy_effect r" + rs1 + " r" + rs2 + " -> r" + rd + " seq=" + dummyEffectSeq
+                  "dummy_effect r" + rs1 + " r" + rs2 + " -> r" + rd + " seq=" + dummyEffectSeq_wbEffect
                 )
               writeIt(p => {
                 MockPayload.create(
@@ -605,11 +619,48 @@ class TestBackendPipeline extends AnyFunSuite {
                   rs1 = Some(rs1),
                   rs2 = rs2,
                   rd = rd,
-                  const = Some(dummyEffectSeq),
+                  const = Some(dummyEffectSeq_wbEffect),
                   opc = GenericOpcode.ADD
                 )
               })
-              dummyEffectSeq += 1
+              dummyEffectSeq_wbEffect += 1
+            }
+            case x if 96 until 100 contains x => {
+              // DUMMY_EFFECT_IN_ORDER_EFFECT
+              caseCount.update(
+                "DUMMY_EFFECT_IN_ORDER_EFFECT",
+                caseCount("DUMMY_EFFECT_IN_ORDER_EFFECT") + 1
+              )
+              val rd =
+                if (Random.nextBoolean())
+                  Some(Random.nextInt(mspec.numArchitecturalRegs))
+                else None
+              val rs1 = Random.nextInt(mspec.numArchitecturalRegs)
+              val rs2 =
+                if (Random.nextBoolean())
+                  Some(Random.nextInt(mspec.numArchitecturalRegs))
+                else None
+              if (rd.isDefined) {
+                mirror(rd.get) = (mirror(rs1) + 42) & 0xffffffffL
+                if (!expectingException)
+                  expectedWritebackLog += ((rd.get, mirror(rd.get)))
+              }
+              if (printInsn)
+                println(
+                  "dummy_effect_in_order_effect r" + rs1 + " r" + rs2 + " -> r" + rd + " seq=" + dummyEffectSeq_inOrderEffect
+                )
+              writeIt(p => {
+                MockPayload.create(
+                  p,
+                  t = 6,
+                  rs1 = Some(rs1),
+                  rs2 = rs2,
+                  rd = rd,
+                  const = Some(dummyEffectSeq_inOrderEffect),
+                  opc = GenericOpcode.ADD
+                )
+              })
+              dummyEffectSeq_inOrderEffect += 1
             }
             case x if 100 until 105 contains x => {
               // LD_W
@@ -987,7 +1038,8 @@ class TestBackendPipeline extends AnyFunSuite {
           println("reg " + i + ": " + data)
         }
 
-        assert(dummyEffectSeq == nextDummyEffectValue)
+        assert(dummyEffectSeq_wbEffect == nextDummyEffectValue(0))
+        assert(dummyEffectSeq_inOrderEffect == nextDummyEffectValue(1))
         println("validation ok")
       }
   }

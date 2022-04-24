@@ -68,7 +68,7 @@ class TestIssue extends AnyFunSuite {
     val issue = IssueUnit(
       c = IssueConfig(portSpecs =
         (0 until numFunctionUnits).map(i =>
-          IssueSpec(staticTag = TestTag.static(i), warnOnBlockedIssue = false)
+          IssueSpec(staticTag = TestTag.static(i), warnOnBlockedIssue = false, inOrder_sideEffect = false)
         )
       ),
       dataType = HardType(TestPayload()),

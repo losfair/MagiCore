@@ -35,7 +35,8 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
           IssueSpec(
             staticTag = u.staticTag,
             warnOnBlockedIssue = u.warnOnBlockedIssue,
-            fastWakeup = u.isAlu
+            fastWakeup = u.isAlu,
+            inOrder_sideEffect = u.inOrder_sideEffect
           )
         )
     ),
@@ -53,7 +54,8 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
               IssueSpec(
                 staticTag = u.staticTag,
                 warnOnBlockedIssue = u.warnOnBlockedIssue,
-                fastWakeup = u.isAlu
+                fastWakeup = u.isAlu,
+                inOrder_sideEffect = u.inOrder_sideEffect
               )
             )
         ),
