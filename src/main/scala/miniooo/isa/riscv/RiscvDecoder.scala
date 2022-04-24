@@ -105,7 +105,7 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
           6 downto 2
         )
       x.opcode := preOpcode.mux(
-        M"00001100" -> useConst.mux(
+        M"0000-100" -> useConst.mux(
           True -> AluOpcode.ADD.craft(),
           False -> fetch
             .insn(30)
@@ -114,17 +114,17 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
               False -> AluOpcode.ADD.craft()
             )
         ),
-        M"00101100" -> AluOpcode.SLL.craft(),
-        M"01-01100" -> AluOpcode.CMP.craft(),
-        M"10001100" -> AluOpcode.XOR.craft(),
-        M"10101100" -> fetch
+        M"0010-100" -> AluOpcode.SLL.craft(),
+        M"01-0-100" -> AluOpcode.CMP.craft(),
+        M"1000-100" -> AluOpcode.XOR.craft(),
+        M"1010-100" -> fetch
           .insn(30)
           .mux(
             True -> AluOpcode.SRA.craft(),
             False -> AluOpcode.SRL.craft()
           ),
-        M"11001100" -> AluOpcode.OR.craft(),
-        M"11101100" -> AluOpcode.AND.craft(),
+        M"1100-100" -> AluOpcode.OR.craft(),
+        M"1110-100" -> AluOpcode.AND.craft(),
         M"---11000" -> AluOpcode.BRANCH.craft(),
         M"---01101" -> AluOpcode.MOV.craft(), // lui
         M"---00101" -> AluOpcode.ADD_TO_PC.craft(), // auipc
@@ -149,8 +149,8 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
       Some(x.asInstanceOf[T])
     } else if (ctag == classTag[DividerOperation]) {
       val x = DividerOperation()
-      x.signed := False
-      x.useRemainder := False
+      x.signed := !fetch.insn(12)
+      x.useRemainder := fetch.insn(13)
       Some(x.asInstanceOf[T])
     } else {
       None

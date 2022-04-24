@@ -129,6 +129,13 @@ case class FetchUnit() extends Area {
 
   val lowLatencyPredictor = new Area {
     val btb = Mem(BtbEntry(), fspec.btbSize)
+    if(fspec.initBranchPredictionBuffers) btb.init((0 until fspec.btbSize).map(_ => {
+      val e = BtbEntry()
+      e.valid := False
+      e.from := 0
+      e.to := 0
+      e
+    }))
     val btbEntry = btb(
       pcWordAddr(pcStreamGen.pc.pc).resize(fspec.btbWidth)
     )
@@ -217,6 +224,12 @@ case class FetchUnit() extends Area {
       val taken = Bool()
     }
     val gshareMem = Mem(GshareEntry(), fspec.globalHistorySize)
+    if(fspec.initBranchPredictionBuffers) gshareMem.init((0 until fspec.globalHistorySize).map(_ => {
+      val e = GshareEntry()
+      e.valid := False
+      e.taken := False
+      e
+    }))
 
     val gshareMemWriteValid = False
     val gshareMemWriteAddr = UInt(fspec.globalHistoryWidth) assignDontCare ()
@@ -291,7 +304,16 @@ case class FetchUnit() extends Area {
         lowLatencyPredictor.btbWriteAddr := pcWordAddr(s1.out.pc).resized
         lowLatencyPredictor.btbWriteData := btbEntry
       } otherwise {
-        Machine.report(Seq("Not rescheduling - pc=", s1.out.pc))
+        Machine.report(
+          Seq(
+            "Not rescheduling - pc=",
+            s1.out.pc,
+            " decision ",
+            decision,
+            " predicted ",
+            s1.pcFetchStage.predictedBranchValid
+          )
+        )
       }
     }
   }

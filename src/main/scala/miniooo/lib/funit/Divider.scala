@@ -167,7 +167,16 @@ final class Divider(staticTagData: => Data, enableException: Boolean = false)
             outStream.payload.exception := MachineException.idle
             outStream.payload.regWriteValue(0) := out
             when(outStream.ready) {
-              Machine.report(Seq("end division: ", out))
+              Machine.report(
+                Seq(
+                  "end division: ",
+                  out,
+                  " useRemainder=",
+                  rt.op.useRemainder,
+                  " signed=",
+                  rt.op.signed
+                )
+              )
               goto(init)
             }
           }

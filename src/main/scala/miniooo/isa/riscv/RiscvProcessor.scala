@@ -9,7 +9,12 @@ import miniooo.frontend._
 import miniooo.lib.funit._
 import spinal.lib.bus.amba4.axi._
 
-case class RiscvProcessor(resetPc: BigInt = 0x0, debug: Boolean = false, normalizePorts: Boolean = false) extends Component {
+case class RiscvProcessor(
+    resetPc: BigInt = 0x0,
+    debug: Boolean = false,
+    normalizePorts: Boolean = false,
+    initBranchPredictionBuffers: Boolean = false
+) extends Component {
   object FuTag extends SpinalEnum(binarySequential) {
     val ALU, LSU, MUL, DIV, EARLY_EXC = newElement()
   }
@@ -33,13 +38,14 @@ case class RiscvProcessor(resetPc: BigInt = 0x0, debug: Boolean = false, normali
     insnWidth = 32 bits,
     addrWidth = 32 bits,
     resetPc = resetPc,
-    globalHistorySize = 1024
+    globalHistorySize = 1024,
+    initBranchPredictionBuffers = initBranchPredictionBuffers
   )
 
   Machine.provide(mspec)
   Machine.provide(fspec)
 
-  if(debug) Machine.provide(MachineDebugMarker)
+  if (debug) Machine.provide(MachineDebugMarker)
 
   val msem = new MachineSemantics {
     lazy val functionUnits: Seq[FunctionUnit] = Seq(
@@ -99,7 +105,7 @@ object RiscvProcessorSyncReset {
 
   def main(args: Array[String]) {
     SyncResetSpinalConfig.generateVerilog(Machine.build {
-      new RiscvProcessor(resetPc = 0x08000000, debug = true)
+      new RiscvProcessor(resetPc = 0x08000000, debug = false, initBranchPredictionBuffers = true)
     })
   }
 }
