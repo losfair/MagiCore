@@ -77,10 +77,12 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
   }
 
   case class OooLoadContext() extends Bundle {
+    val addr = spec.dataType
     val strb = strbType()
-    val shift = UInt(byteOffsetWidth)
     val size = LsuOperationSize()
     val signExt = Bool()
+
+    def shift = addr.resize(byteOffsetWidth).asUInt
   }
 
   case class StoreBufferEntry() extends Bundle {
@@ -520,7 +522,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
 
               val ctx = OooLoadContext()
               ctx.strb := req.payload.strb
-              ctx.shift := req.payload.addr.asUInt.resized
+              ctx.addr := req.payload.addr
               ctx.size := req.payload.size
               ctx.signExt := req.payload.signExt
 
@@ -613,6 +615,19 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         )
 
         val ctx = oooLoadContexts(commitReq.token.robIndex)
+
+        commitReq.exception.memoryError_accessAddr := ctx.addr
+        when(axiM.r.payload.resp =/= 0) {
+          commitReq.exception.valid := True
+          commitReq.exception.code := MachineExceptionCode.MEMORY_ERROR
+
+          when(outStream_oooRead.fire) {
+            Machine.report(
+              Seq("OoO read error: ", axiM.r.payload.resp, " addr=", ctx.addr)
+            )
+          }
+        }
+
         val data =
           convertLoadOutputToRegValue(
             axiM.r.payload.data,
