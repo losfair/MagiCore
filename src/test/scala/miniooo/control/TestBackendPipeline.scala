@@ -51,13 +51,14 @@ class TestBackendPipeline extends AnyFunSuite {
       new Multiplier(TestTag.static(1), MultiplierConfig()),
       new Divider(TestTag.static(2)),
       new DummyEffect(TestTag.static(3)),
-      new Lsu(TestTag.static(4), LsuConfig())
+      new Lsu(TestTag.static(4), LsuConfig()),
+      new EarlyExcPassthrough(TestTag.static(5))
     )
   }
 
   object GenericOpcode extends SpinalEnum(binarySequential) {
-    val ADD, SUB, AND, OR, XOR, MOV, DIV_S, DIV_U, REM_S, REM_U, LD_B_U, LD_B_S, LD_H_U, LD_H_S,
-        LD_W, ST_B, ST_H, ST_W, MFENCE, BLTU, BGE, BEQ =
+    val ADD, SUB, AND, OR, XOR, MOV, DIV_S, DIV_U, REM_S, REM_U, LD_B_U, LD_B_S,
+        LD_H_U, LD_H_S, LD_W, ST_B, ST_H, ST_W, MFENCE, BLTU, BGE, BEQ, SERIALIZE =
       newElement()
 
     def translateToAlu(
@@ -137,6 +138,13 @@ class TestBackendPipeline extends AnyFunSuite {
         )
         op.signExt := opc === GenericOpcode.LD_B_S || opc === GenericOpcode.LD_H_S
         op.offset := const.asSInt
+        Some(op.asInstanceOf[T])
+      } else if (ctag == classTag[EarlyException]) {
+        val op = EarlyException()
+        op.code := opc.mux(
+          GenericOpcode.SERIALIZE -> EarlyExceptionCode.SERIALIZE.craft(),
+          default -> EarlyExceptionCode.DECODE_ERROR.craft()
+        )
         Some(op.asInstanceOf[T])
       } else {
         None
@@ -356,6 +364,7 @@ class TestBackendPipeline extends AnyFunSuite {
         caseCount.update("BR_HIT", 0)
         caseCount.update("BR_MISS", 0)
         caseCount.update("MFENCE", 0)
+        caseCount.update("SERIALIZE", 0)
 
         val testSize = 200000
         var writebackCount = 0
@@ -458,6 +467,18 @@ class TestBackendPipeline extends AnyFunSuite {
           }
         }
 
+        def scheduleException() {
+          if (!expectingException) {
+            exceptionCount += 1
+            expectingException = true
+            memMirror_excSnapshot = memMirror.toSeq.to[ArrayBuffer]
+            mirror_excSnapshot = mirror.toSeq.to[ArrayBuffer]
+            insnCount_excSnapshot = insnCount
+            dummyEffectSeq_excSnapshot = dummyEffectSeq
+            if (printInsn) println("---- discarded range start ---")
+          }
+        }
+
         for (i <- 0 until testSize) {
           checkPendingException()
           insnCount += 1
@@ -466,7 +487,7 @@ class TestBackendPipeline extends AnyFunSuite {
             delayCount += thisDelay
             dut.clockDomain.waitSampling(thisDelay)
           }
-          val op = Random.nextInt(125)
+          val op = Random.nextInt(126)
           op match {
             case x if 0 until 10 contains x =>
               // LD_CONST
@@ -700,7 +721,7 @@ class TestBackendPipeline extends AnyFunSuite {
               val data_ = (memMirror(
                 (addr / (mspec.dataWidth.value / 8)).toInt
               ) >> bitShift.toInt) & 0xff
-              val data = if((data_ >> 7) == 0) data_ else (data_ | 0xffffff00L)
+              val data = if ((data_ >> 7) == 0) data_ else (data_ | 0xffffff00L)
               mirror.update(rd, data)
               if (!expectingException) {
                 expectedWritebackLog += ((rd, addr))
@@ -870,15 +891,7 @@ class TestBackendPipeline extends AnyFunSuite {
                       .hexString() + ")"
                   )
                 caseCount.update("BR_MISS", caseCount("BR_MISS") + 1)
-                if (!expectingException) {
-                  exceptionCount += 1
-                  expectingException = true
-                  memMirror_excSnapshot = memMirror.toSeq.to[ArrayBuffer]
-                  mirror_excSnapshot = mirror.toSeq.to[ArrayBuffer]
-                  insnCount_excSnapshot = insnCount
-                  dummyEffectSeq_excSnapshot = dummyEffectSeq
-                  if (printInsn) println("---- discarded range start ---")
-                }
+                scheduleException()
               } else {
                 if (printInsn)
                   println(
@@ -920,6 +933,26 @@ class TestBackendPipeline extends AnyFunSuite {
                   opc = GenericOpcode.MFENCE
                 )
               })
+            }
+            case x if 125 until 126 contains x => {
+              // SERIALIZE
+
+              if (printInsn)
+                println("serialize")
+
+              caseCount.update("SERIALIZE", caseCount("SERIALIZE") + 1)
+              writeIt(p => {
+                MockPayload.create(
+                  p,
+                  t = 5,
+                  rs1 = None,
+                  rs2 = None,
+                  const = None,
+                  rd = None,
+                  opc = GenericOpcode.SERIALIZE
+                )
+              })
+              scheduleException()
             }
           }
         }

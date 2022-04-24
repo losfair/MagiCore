@@ -139,5 +139,13 @@ object FullMachineException {
 }
 
 object MachineExceptionCode extends SpinalEnum(binarySequential) {
-  val BRANCH_MISS, INSN_CACHE_MISS, DECODE_ERROR, DIVIDE_ERROR = newElement()
+  val BRANCH_MISS, INSN_CACHE_MISS, DECODE_ERROR, DIVIDE_ERROR, SERIALIZE = newElement()
+
+  def shouldSuppressWriteback(code: SpinalEnumCraft[MachineExceptionCode.type]): Bool = {
+    code.mux(
+      BRANCH_MISS -> False,
+      SERIALIZE -> False,
+      default ->  True
+    )
+  }
 }

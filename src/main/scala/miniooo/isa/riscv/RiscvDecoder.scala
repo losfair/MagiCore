@@ -14,6 +14,8 @@ import miniooo.lib.funit.AluOpcode
 import javax.swing.plaf.multi.MultiOptionPaneUI
 import miniooo.lib.funit.DividerOperation
 import miniooo.lib.funit.LsuOperationSize
+import miniooo.lib.funit.EarlyException
+import miniooo.lib.funit.EarlyExceptionCode
 
 object ImmType extends SpinalEnum(binarySequential) {
   val X, I, H, S, B, J, U =

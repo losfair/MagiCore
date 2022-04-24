@@ -129,13 +129,14 @@ case class FetchUnit() extends Area {
 
   val lowLatencyPredictor = new Area {
     val btb = Mem(BtbEntry(), fspec.btbSize)
-    if(fspec.initBranchPredictionBuffers) btb.init((0 until fspec.btbSize).map(_ => {
-      val e = BtbEntry()
-      e.valid := False
-      e.from := 0
-      e.to := 0
-      e
-    }))
+    if (fspec.initBranchPredictionBuffers)
+      btb.init((0 until fspec.btbSize).map(_ => {
+        val e = BtbEntry()
+        e.valid := False
+        e.from := 0
+        e.to := 0
+        e
+      }))
     val btbEntry = btb(
       pcWordAddr(pcStreamGen.pc.pc).resize(fspec.btbWidth)
     )
@@ -224,12 +225,13 @@ case class FetchUnit() extends Area {
       val taken = Bool()
     }
     val gshareMem = Mem(GshareEntry(), fspec.globalHistorySize)
-    if(fspec.initBranchPredictionBuffers) gshareMem.init((0 until fspec.globalHistorySize).map(_ => {
-      val e = GshareEntry()
-      e.valid := False
-      e.taken := False
-      e
-    }))
+    if (fspec.initBranchPredictionBuffers)
+      gshareMem.init((0 until fspec.globalHistorySize).map(_ => {
+        val e = GshareEntry()
+        e.valid := False
+        e.taken := False
+        e
+      }))
 
     val gshareMemWriteValid = False
     val gshareMemWriteAddr = UInt(fspec.globalHistoryWidth) assignDontCare ()
@@ -352,6 +354,8 @@ case class FetchUnit() extends Area {
   val pcExceptionHandler = new Area {
     when(exc.exc.valid) {
       val theirFetchPacket = exc.lookup[FetchPacket]
+      val nextPCforTheirFetchPacket =
+        ((theirFetchPacket.pc & fspec.addrMask) + fspec.addrStep)
       pcStreamGen.pc.pcTag := False
       when(exc.exc.code === MachineExceptionCode.BRANCH_MISS) {
         Machine.report(
@@ -371,7 +375,7 @@ case class FetchUnit() extends Area {
           )
         )
         pcStreamGen.pc.pc := exc.exc.brTaken.mux(
-          False -> ((theirFetchPacket.pc & fspec.addrMask) + fspec.addrStep),
+          False -> nextPCforTheirFetchPacket,
           True -> exc.exc.brDstAddr.asUInt
         )
         s2.gshareMemWriteAddr := (theirFetchPacket.globalHistory.resize(
@@ -396,6 +400,9 @@ case class FetchUnit() extends Area {
           ).resized
           lowLatencyPredictor.btbWriteData := btbEntry
         }
+      } elsewhen (exc.exc.code === MachineExceptionCode.SERIALIZE) {
+        Machine.report(Seq("Got serialization exception. Restarting at next pc."))
+        pcStreamGen.pc.pc := nextPCforTheirFetchPacket
       } otherwise {
         Machine.report(Seq("Got exception - IFetch lockup."))
         pcStreamGen.valid := False
