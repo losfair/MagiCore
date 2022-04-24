@@ -1,9 +1,9 @@
 # Makefile
 
 # defaults
-#SIM ?= verilator
-#EXTRA_ARGS += -Wno-WIDTH -Wno-CMPCONST -Wno-PINMISSING
-SIM ?= icarus
+SIM ?= verilator
+EXTRA_ARGS += -Wno-WIDTH -Wno-CMPCONST -Wno-PINMISSING
+#SIM ?= icarus
 TOPLEVEL_LANG ?= verilog
 
 VERILOG_SOURCES += $(PWD)/RvTop.v
