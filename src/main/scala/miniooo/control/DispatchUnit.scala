@@ -6,6 +6,7 @@ import miniooo.util._
 import MiniOoOExt._
 import scala.reflect._
 import miniooo.lib.funit.AluBranchContext
+import miniooo.frontend.FetchPacket
 
 case class DispatchInfo(hardType: HardType[_ <: PolymorphicDataChain])
     extends Bundle
@@ -459,6 +460,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           popPtr := entryData.addr + 1
 
           val brCtx = entryData.data.commitRequest.tryLookup[AluBranchContext]
+          val fetchPkt = entryData.data.commitRequest.tryLookup[FetchPacket]
 
           Machine.report(
             Seq(
@@ -470,26 +472,31 @@ case class DispatchUnit[T <: PolymorphicDataChain](
               entryData.data.commitRequest.exception.valid,
               " exc.code ",
               entryData.data.commitRequest.exception.code
-            ) ++ (if (brCtx.isDefined) Seq(" pc ", brCtx.get.pc)
-                  else Seq()) ++ renameInfo.physDstRegs
-              .zip(
-                decodeInfo.archDstRegs
-              )
-              .zip(entryData.data.commitRequest.regWriteValue)
-              .flatMap(arg => {
-                val ((phys, arch), value) = arg
-                Seq(
-                  "[v=",
-                  arch.valid,
-                  ",phys=",
-                  phys,
-                  ",arch=",
-                  arch.index,
-                  ",value=",
-                  value,
-                  "]"
+            ) ++
+              (if (brCtx.isDefined) Seq(" pc ", brCtx.get.pc)
+               else Seq()) ++
+              (if (fetchPkt.isDefined)
+                 Seq(" insn ", fetchPkt.get.insn)
+               else Seq()) ++
+              renameInfo.physDstRegs
+                .zip(
+                  decodeInfo.archDstRegs
                 )
-              })
+                .zip(entryData.data.commitRequest.regWriteValue)
+                .flatMap(arg => {
+                  val ((phys, arch), value) = arg
+                  Seq(
+                    "[v=",
+                    arch.valid,
+                    ",phys=",
+                    phys,
+                    ",arch=",
+                    arch.index,
+                    ",value=",
+                    value,
+                    "]"
+                  )
+                })
           )
         }
       }
