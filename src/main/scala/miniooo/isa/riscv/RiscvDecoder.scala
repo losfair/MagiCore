@@ -146,6 +146,7 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
           M"01" -> LsuOperationSize.HALF.craft(),
           default -> LsuOperationSize.WORD.craft()
         )
+      x.signExt := !fetch.insn(14)
       Some(x.asInstanceOf[T])
     } else if (ctag == classTag[DividerOperation]) {
       val x = DividerOperation()
