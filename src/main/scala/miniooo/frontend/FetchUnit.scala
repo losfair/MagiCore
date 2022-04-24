@@ -61,6 +61,8 @@ case class FetchPacket() extends Bundle with PolymorphicDataChain {
   }
 }
 
+case class FetchRestartSignal(valid: Bool, pc: UInt)
+
 case class FetchUnit() extends Area {
   private val fspec = Machine.get[FrontendSpec]
 
@@ -351,6 +353,23 @@ case class FetchUnit() extends Area {
     }
   }
 
+  // Restart
+  val restartLogic = new Area {
+    val x = Machine.tryGet[FetchRestartSignal]
+    if (x.isDefined) {
+      when(x.get.valid) {
+        assert(
+          pcStreamGen.valid === False,
+          "unexpected valid status for pc stream gen during restart"
+        )
+        assert(!exc.exc.valid, "unexpected exception during restart")
+        assert(pcStreamGen.pc.pcTag === False, "invalid pcTag during restart")
+        pcStreamGen.valid := True
+        pcStreamGen.pc.pc := x.get.pc
+      }
+    }
+  }
+
   // Highest priority
   val pcExceptionHandler = new Area {
     when(exc.exc.valid) {
@@ -402,7 +421,9 @@ case class FetchUnit() extends Area {
           lowLatencyPredictor.btbWriteData := btbEntry
         }
       } elsewhen (exc.exc.code === MachineExceptionCode.SERIALIZE) {
-        Machine.report(Seq("Got serialization exception. Restarting at next pc."))
+        Machine.report(
+          Seq("Got serialization exception. Restarting at next pc.")
+        )
         pcStreamGen.pc.pc := nextPCforTheirFetchPacket
       } elsewhen (exc.exc.code === MachineExceptionCode.INSN_CACHE_FLUSH) {
         Machine.report(Seq("Requested ICache flush."))

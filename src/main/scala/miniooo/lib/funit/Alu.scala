@@ -10,6 +10,8 @@ case class AluConfig(
     linkOffset: Int = 4
 )
 
+case class AluPerfCounters(brHit: UInt, brMiss: UInt)
+
 case class AluBranchContext(
     globalHistoryWidth: BitCount
 ) extends Bundle
@@ -135,6 +137,19 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
       )
 
       val brCtx = in.tryLookup[AluBranchContext]
+      val perfCtr = Machine.tryGet[AluPerfCounters]
+
+      val incBrHit = False
+      val incBrMiss = False
+
+      if (perfCtr.isDefined) when(io_input.fire) {
+        when(incBrHit) {
+          perfCtr.get.brHit := perfCtr.get.brHit + 1
+        }
+        when(incBrMiss) {
+          perfCtr.get.brMiss := perfCtr.get.brMiss + 1
+        }
+      }
 
       val outValue = UInt(out.regWriteValue(0).getWidth bits)
       outValue.assignDontCare()
@@ -196,6 +211,7 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
               )
             }
             outValue := linkValue
+            incBrHit := True
           }
           is(AluOpcode.BRANCH) {
             import AluBranchCondition._
@@ -229,6 +245,9 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
                 out.exception.brDstAddr := computedTarget
                 out.exception.brIsConst := True
                 out.exception.brTaken := cond
+                incBrMiss := True
+              } otherwise {
+                incBrHit := True
               }
             }
           }
@@ -246,6 +265,9 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
               out.exception.brDstAddr := target
               out.exception.brIsConst := False
               out.exception.brTaken := True
+              incBrMiss := True
+            } otherwise {
+              incBrHit := True
             }
           }
         }

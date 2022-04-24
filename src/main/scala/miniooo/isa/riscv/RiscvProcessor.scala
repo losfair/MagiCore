@@ -54,7 +54,7 @@ case class RiscvProcessor(
     lazy val functionUnits: Seq[FunctionUnit] = Seq(
       new Alu(FuTag.ALU, AluConfig(alu32 = false)),
       new Multiplier(FuTag.MUL, MultiplierConfig()),
-      new Divider(FuTag.DIV, enableException = true),
+      new Divider(FuTag.DIV, enableException = false),
       new Lsu(FuTag.LSU, LsuConfig()),
       new EarlyExcPassthrough(FuTag.EARLY_EXC),
       new RvCsr(FuTag.CSR)
