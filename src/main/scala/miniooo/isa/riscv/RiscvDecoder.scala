@@ -16,6 +16,7 @@ import miniooo.lib.funit.DividerOperation
 import miniooo.lib.funit.LsuOperationSize
 import miniooo.lib.funit.EarlyException
 import miniooo.lib.funit.EarlyExceptionCode
+import miniooo.lib.funit.MultiplierOperation
 
 object ImmType extends SpinalEnum(binarySequential) {
   val X, I, H, S, B, J, U =
@@ -154,6 +155,35 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
       x.signed := !fetch.insn(12)
       x.useRemainder := fetch.insn(13)
       Some(x.asInstanceOf[T])
+    } else if (ctag == classTag[MultiplierOperation]) {
+      val op = MultiplierOperation()
+      switch(fetch.insn(13 downto 12)) {
+        is(B"00") {
+          // MUL
+          op.aSigned := False
+          op.bSigned := False
+          op.upperHalf := False
+        }
+        is(B"01") {
+          // MULH
+          op.aSigned := True
+          op.bSigned := True
+          op.upperHalf := True
+        }
+        is(B"10") {
+          // MULHSU
+          op.aSigned := True
+          op.bSigned := False
+          op.upperHalf := True
+        }
+        default {
+          // MULHU
+          op.aSigned := False
+          op.bSigned := False
+          op.upperHalf := True
+        }
+      }
+      Some(op.asInstanceOf[T])
     } else {
       None
     }

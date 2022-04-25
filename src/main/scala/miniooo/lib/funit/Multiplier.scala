@@ -6,10 +6,16 @@ import miniooo.util.PolymorphicDataChain
 import miniooo.control._
 
 case class MultiplierConfig(
-
 )
 
-class Multiplier(staticTagData: => Data, c: MultiplierConfig) extends FunctionUnit {
+case class MultiplierOperation() extends Bundle {
+  val aSigned = Bool()
+  val bSigned = Bool()
+  val upperHalf = Bool()
+}
+
+class Multiplier(staticTagData: => Data, c: MultiplierConfig)
+    extends FunctionUnit {
   def staticTag: Data = staticTagData
   override def generate(
       hardType: HardType[_ <: PolymorphicDataChain]
@@ -31,26 +37,39 @@ class Multiplier(staticTagData: => Data, c: MultiplierConfig) extends FunctionUn
         val a = spec.dataType
         val b = spec.dataType
         val token = CommitToken()
+        val op = MultiplierOperation()
       }
 
       val initialPayload = Payload()
       initialPayload.a := issue.srcRegData(0)
       initialPayload.b := issue.srcRegData(1)
       initialPayload.token := dispatchInfo.lookup[CommitToken]
+      initialPayload.op := in.lookup[MultiplierOperation]
       val stream = io_input.translateWith(initialPayload).stage()
 
       case class Intermediate() extends Bundle {
-        val value = spec.dataType
+        val value = SInt(((spec.dataWidth.value + 1) * 2) bits)
         val token = CommitToken()
+        val op = MultiplierOperation()
       }
       val stage1Payload = Intermediate()
-      stage1Payload.value := (stream.payload.a.asUInt * stream.payload.b.asUInt).asBits.resized
+
+      val aExt =
+        ((stream.payload.a.msb && stream.payload.op.aSigned) ## stream.payload.a).asSInt
+      val bExt =
+        ((stream.payload.b.msb && stream.payload.op.bSigned) ## stream.payload.b).asSInt
+      stage1Payload.value := aExt * bExt
       stage1Payload.token := stream.payload.token
+      stage1Payload.op := stream.payload.op
       val stage1 = stream.translateWith(stage1Payload).stage()
 
       out.token := stage1.payload.token
       out.exception := MachineException.idle
-      out.regWriteValue(0) := stage1.payload.value
+
+      val outValue = stage1.payload.value.asBits
+      out.regWriteValue(0) := stage1.payload.op.upperHalf ? outValue(
+        spec.dataWidth.value * 2 - 1 downto spec.dataWidth.value
+      ) | outValue(spec.dataWidth.value - 1 downto 0)
       io_output <-/< stage1.translateWith(out)
     }
   }

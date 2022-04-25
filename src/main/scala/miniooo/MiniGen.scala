@@ -89,6 +89,12 @@ class MiniGen extends Component {
         op.signed := opc === GenericOpcode.DIV_S || opc === GenericOpcode.REM_S
         op.useRemainder := opc === GenericOpcode.REM_S || opc === GenericOpcode.REM_U
         Some(op.asInstanceOf[T])
+      } else if (ctag == classTag[MultiplierOperation]) {
+        val op = MultiplierOperation()
+        op.aSigned := False
+        op.bSigned := False
+        op.upperHalf := False
+        Some(op.asInstanceOf[T])
       } else if (ctag == classTag[LsuOperation]) {
         val op = LsuOperation()
         op.isStore := opc === GenericOpcode.ST
