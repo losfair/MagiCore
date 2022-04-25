@@ -19,25 +19,6 @@ case class IssuePort[T <: Data](hardType: HardType[T])
     Machine.get[MachineSpec].dataType,
     Machine.get[MachineSpec].maxNumSrcRegsPerInsn
   )
-
-  def toPhysSrcRegActivationMask(): Vec[Bool] = {
-    val spec = Machine.get[MachineSpec]
-    val renameInfo = this.lookup[RenameInfo]
-    val decodeInfo = this.lookup[DecodeInfo]
-
-    Vec(
-      (0 until spec.numPhysicalRegs).map(i =>
-        decodeInfo.archSrcRegs
-          .zip(renameInfo.physSrcRegs)
-          .map({
-            case (arch, phys) => {
-              arch.valid && phys === i
-            }
-          })
-          .orR
-      )
-    )
-  }
 }
 
 case class IssueSpec(

@@ -56,8 +56,6 @@ case class RenameUnit[T <: PolymorphicDataChain](
   val io = new Bundle {
     val input = Stream(dataType())
     val output = Stream(outType)
-    val physSrcRegActivationMask_ooo = Flow(Vec(Bool(), spec.numPhysicalRegs))
-    val physSrcRegActivationMask_ino = Flow(Vec(Bool(), spec.numPhysicalRegs))
   }
 
   // Rename Map Table
@@ -79,49 +77,6 @@ case class RenameUnit[T <: PolymorphicDataChain](
   validateXmt("rmt", rmt, rmtAllowMask)
   validateXmt("cmt", cmt, cmtAllowMask)
 
-  // SRC refcount
-  val srcRefcountWidth = 3 bits
-  def srcRefcountType = UInt(srcRefcountWidth)
-  val srcRefcount = new ResetArea(reset = reset, cumulative = true) {
-    val v = Vec(
-      (0 until spec.numPhysicalRegs).map(_ => Reg(srcRefcountType) init (0))
-    )
-  }.v
-  val zeroRefcountMask = Vec(srcRefcount.map(x => x === 0))
-
-  val incRefcount = Vec(Bool(), spec.numPhysicalRegs)
-  for (b <- incRefcount) b := False
-
-  val decRefcount_ooo = Vec(Bool(), spec.numPhysicalRegs)
-  for ((b, i) <- decRefcount_ooo.zipWithIndex)
-    b := io.physSrcRegActivationMask_ooo.valid & io.physSrcRegActivationMask_ooo
-      .payload(i)
-
-  val decRefcount_ino = Vec(Bool(), spec.numPhysicalRegs)
-  for ((b, i) <- decRefcount_ino.zipWithIndex)
-    b := io.physSrcRegActivationMask_ino.valid & io.physSrcRegActivationMask_ino
-      .payload(i)
-
-  for (i <- 0 until spec.numPhysicalRegs) {
-    val (inc, dec1, dec2) =
-      (incRefcount(i), decRefcount_ooo(i), decRefcount_ino(i))
-    when(inc && !dec1 && !dec2) {
-      assert(srcRefcount(i) =/= srcRefcountType.maxValue, "Refcount overflow")
-      srcRefcount(i) := srcRefcount(i) + 1
-    }
-    when((inc && dec1 && dec2) || (!inc && (dec1 ^ dec2))) {
-      assert(srcRefcount(i) =/= 0, "Refcount underflow (1)")
-      srcRefcount(i) := srcRefcount(i) - 1
-    }
-    when(!inc && dec1 && dec2) {
-      assert(
-        srcRefcount(i) =/= 0 && srcRefcount(i) =/= 1,
-        "Refcount underflow (2)"
-      )
-      srcRefcount(i) := srcRefcount(i) - 2
-    }
-  }
-
   val prfIf = Machine.get[PrfInterface]
   val decodeInfo = io.input.payload.lookup[DecodeInfo]
 
@@ -140,9 +95,8 @@ case class RenameUnit[T <: PolymorphicDataChain](
         val (thisAllocOk, index) = prfIf.state.findFreeReg(
           Vec(
             localAllowMask
-              .zip(zeroRefcountMask)
               .zip(cmtAllowMask)
-              .map(x => x._1._1 && x._1._2 && x._2)
+              .map(x => x._1 && x._2)
           )
         )
         allocOk = entry.valid.mux(
@@ -164,19 +118,13 @@ case class RenameUnit[T <: PolymorphicDataChain](
     )
   })
 
-  val refcountIncOk = decodeInfo.archSrcRegs
-    .zip(output.physSrcRegs)
-    .map { case (arch, phys) =>
-      !arch.valid || srcRefcount(phys) =/= srcRefcountType.maxValue
-    }
-    .andR
 
   io.output << io.input
     .translateWith(output)
-    .continueWhen(allocOk && refcountIncOk)
+    .continueWhen(allocOk)
   when(io.input.isStall) {
     Machine.report(
-      Seq("Rename STALL: allocOk=", allocOk, " refcountIncOk=", refcountIncOk)
+      Seq("Rename STALL: allocOk=", allocOk)
     )
   }
 
@@ -190,14 +138,6 @@ case class RenameUnit[T <: PolymorphicDataChain](
         rmt.write(arch.index, phys)
         rmtAllowMask.write(rmt(arch.index), True)
         rmtAllowMask.write(phys, False)
-      }
-    }
-    for (
-      (arch, phys) <- decodeInfo.archSrcRegs
-        .zip(output.physSrcRegs)
-    ) {
-      when(arch.valid) {
-        incRefcount(phys) := True
       }
     }
     Machine.report(

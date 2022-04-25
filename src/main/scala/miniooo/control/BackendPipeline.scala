@@ -74,18 +74,6 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
       dispatch.io.inOrderOutput.setBlocked()
   }
 
-  rename.io.physSrcRegActivationMask_ooo << oooIssue.io.issueMonitor
-    .translateWith(
-      oooIssue.io.issueMonitor.payload.toPhysSrcRegActivationMask()
-    )
-
-  if (inOrderIssue != null)
-    rename.io.physSrcRegActivationMask_ino << inOrderIssue.io.issueMonitor
-      .translateWith(
-        inOrderIssue.io.issueMonitor.payload.toPhysSrcRegActivationMask()
-      )
-  else rename.io.physSrcRegActivationMask_ino.setIdle()
-
   private val functionUnitInstances_ = (0 until sem.functionUnits.length)
     .map(_ => null.asInstanceOf[FunctionUnitInstance])
     .to[ArrayBuffer]
