@@ -118,3 +118,8 @@ asm_return_from_interrupt:
     lw a0, 36(a0)
     addi sp, sp, 120
     mret
+
+.globl do_ecall
+do_ecall:
+    ecall
+    ret

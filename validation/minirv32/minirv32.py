@@ -15,7 +15,7 @@ async def monitor_clk(dut):
 
 
 async def monitor_uart(dut):
-    duration = 1000000000 // 921600
+    duration = 1000000000 // 115200
     rx = dut.uart_txd
 
     # https://github.com/wallento/cocotbext-uart/blob/master/cocotbext/uart/base.py
@@ -46,12 +46,40 @@ async def monitor_uart(dut):
         sys.stdout.write(chr(data))
         sys.stdout.flush()
 
+class AxiDebugControllerRegion(Region):
+    def __init__(self, size=4096, **kwargs):
+        super().__init__(size, **kwargs)
+        self.stop = False
+
+    async def _read(self, address, length, **kwargs):
+        print("AXI DEBUG read: address=0x{:08x}, length={}".format(address, length))
+        return 0
+
+    async def _write(self, address, data, **kwargs):
+        assert len(data) == 4
+        value = struct.unpack("<I", data)[0]
+        if address == 0:
+            sys.stdout.write(chr(value))
+            sys.stdout.flush()
+        elif address == 4:
+            self.stop = True
+        elif address == 8:
+            pass
+        else:
+            raise Exception("AXI DEBUG write error: address=0x{:08x}, value=0x{:08x}".format(address, value))
+
 @cocotb.test()
 async def first_test(dut):
     addressSpace = AddressSpace(2 ** 32)
 
     dataMem = MemoryRegion(16777216)
-    addressSpace.register_region(dataMem, 0x20000000)
+    addressSpace.register_region(dataMem, 0x80000000)
+
+    with open("/home/ubuntu/Projects/coremark-violet/firmware.bin", "rb") as f:
+        await dataMem.write(0, f.read())
+
+    debugCtrl = AxiDebugControllerRegion()
+    addressSpace.register_region(debugCtrl, 0x43000000)
 
     axiSlavePort = AxiSlave(AxiBus.from_prefix(
         dut, "dBus"), dut.clk, dut.rst, target=addressSpace)
@@ -66,7 +94,7 @@ async def first_test(dut):
     print("reset ok")
 
     # await cocotb.start(monitor_clk(dut))
-    await cocotb.start(monitor_uart(dut))
+    # await cocotb.start(monitor_uart(dut))
 
     while True:
         await RisingEdge(dut.clk)
