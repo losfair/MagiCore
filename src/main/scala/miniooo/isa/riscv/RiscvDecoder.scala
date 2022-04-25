@@ -50,9 +50,9 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
   val rs1Valid = Bool()
   val rs2Valid = Bool()
   val rdValid = Bool()
-  val fenceI = Bool()
 
   val fuTag = mspec.functionUnitTagType()
+  val earlyExc = EarlyException()
   val immType = ImmType()
 
   def parentObjects = Seq(fetch)
@@ -61,10 +61,7 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
     val E = RvEncoding
 
     if (ctag == classTag[EarlyException]) {
-      val x = EarlyException()
-      x.code := fetch.cacheMiss ? EarlyExceptionCode.CACHE_MISS |
-        (fenceI ? EarlyExceptionCode.INSN_CACHE_FLUSH | EarlyExceptionCode.DECODE_ERROR)
-      Some(x.asInstanceOf[T])
+      Some(earlyExc.asInstanceOf[T])
     } else if (ctag == classTag[DecodeInfo]) {
       val x = DecodeInfo(null)
       x.archSrcRegs(0).valid := rs1Valid
@@ -193,7 +190,7 @@ case class RiscvDecoder(
   out.rs1Valid := False
   out.rs2Valid := False
   out.rdValid := False
-  out.fenceI := False
+  out.earlyExc.assignDontCare()
 
   val outPatched = DecodePacket()
   outPatched.rs1Valid := out.rs1Valid && insn(E.rs1Range).asUInt =/= 0
@@ -203,6 +200,7 @@ case class RiscvDecoder(
 
   when(out.fetch.cacheMiss) {
     outPatched.fuTag := earlyExceptionPort
+    outPatched.earlyExc.code := EarlyExceptionCode.CACHE_MISS
   }
 
   io.output << io.input.translateWith(outPatched)
@@ -306,11 +304,17 @@ case class RiscvDecoder(
     is(E.FENCEI) {
       out.fuTag := earlyExceptionPort
       out.immType := ImmType.X
-      out.fenceI := True
+      out.earlyExc.code := EarlyExceptionCode.INSN_CACHE_FLUSH
+    }
+    is(E.MRET) {
+      out.fuTag := earlyExceptionPort
+      out.immType := ImmType.X
+      out.earlyExc.code := EarlyExceptionCode.EXCEPTION_RETURN
     }
     default {
       out.fuTag := earlyExceptionPort
       out.immType := ImmType.X
+      out.earlyExc.code := EarlyExceptionCode.DECODE_ERROR
     }
   }
 

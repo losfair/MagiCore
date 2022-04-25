@@ -3,6 +3,8 @@ package miniooo.util
 import spinal.core._
 import spinal.lib._
 import scala.collection.IterableLike
+import java.io.File
+import java.io.FileInputStream
 
 object MiniOoOExt {
   implicit class StreamExt[T <: Data](stream: Stream[T]) {
@@ -110,6 +112,34 @@ object MiniOoOExt {
           }
           (ok, out)
         })
+    }
+  }
+
+  implicit class MemExt[T <: Data](mem: Mem[T]) {
+    def initFromFile(filename: String): Unit = {
+      val wordWidth = mem.wordType().getBitsWidth
+      assert(wordWidth % 8 == 0)
+      val wordSizeInBytes = wordWidth / 8
+
+      val file = new File(filename)
+      val in = new FileInputStream(file)
+      var bytes: Array[Byte] = null
+      try {
+        bytes = in.readAllBytes()
+      } finally {
+        in.close()
+      }
+
+      assert(bytes.length <= mem.byteCount)
+
+      if (bytes.length < mem.byteCount) {
+        val padding = Array.fill(mem.byteCount - bytes.length)(0.toByte)
+        bytes = bytes ++ padding
+      }
+
+      val content =
+        bytes.grouped(wordSizeInBytes).map(x => BigInt(x.reverse)).toSeq
+      mem.initBigInt(content)
     }
   }
 }

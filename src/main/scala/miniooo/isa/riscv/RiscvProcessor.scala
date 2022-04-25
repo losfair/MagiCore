@@ -12,7 +12,6 @@ import spinal.lib.bus.amba4.axi._
 case class RiscvProcessor(
     resetPc: BigInt = 0x0,
     debug: Boolean = false,
-    normalizePorts: Boolean = false,
     initBranchPredictionBuffers: Boolean = false
 ) extends Component {
   object FuTag extends SpinalEnum(binarySequential) {

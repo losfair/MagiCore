@@ -218,36 +218,32 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
         val exc = fullExc.exc
         val fetch = fullExc.lookup[FetchPacket]
 
-        val restart = False
-        val mcause = UInt(6 bits)
-
-        mcause.assignDontCare()
+        val excRestartPC = (csr.csrFile.mtvec(csr.csrFile.mtvec.getWidth - 1 downto 2) ## B"00").asUInt
+        def restartIntoException(mcause: Int, mtval: UInt) {
+          restartIt_reg := True
+          restartPC_reg := excRestartPC
+          csr.csrFile.mcause := mcause
+          csr.csrFile.mepc := fetch.pc
+          csr.csrFile.mtval := mtval
+        }
 
         when(exc.valid) {
           switch(exc.code) {
             is(MachineExceptionCode.DECODE_ERROR) {
               // Illegal instruction
-              restart := True
-              mcause := 2
-              csr.csrFile.mtval := fetch.insn.asUInt
+              restartIntoException(2, fetch.insn.asUInt)
             }
             is(MachineExceptionCode.MEMORY_ERROR) {
               // Load access fault
-              restart := True
-              mcause := 5
-              csr.csrFile.mtval := exc.memoryError_accessAddr.asUInt
+              restartIntoException(5, exc.memoryError_accessAddr.asUInt)
+            }
+            is(MachineExceptionCode.EXCEPTION_RETURN) {
+              // MRET
+              restartIt_reg := True
+              restartPC_reg := csr.csrFile.mepc + 4
             }
             default {}
           }
-        }
-
-        when(restart) {
-          val mtvecBase =
-            csr.csrFile.mtvec(csr.csrFile.mtvec.getWidth - 1 downto 2) ## B"00"
-          restartIt_reg := True
-          restartPC_reg := mtvecBase.asUInt
-          csr.csrFile.mcause := mcause.resized
-          csr.csrFile.mepc := fetch.pc
         }
 
         Machine.provide(
