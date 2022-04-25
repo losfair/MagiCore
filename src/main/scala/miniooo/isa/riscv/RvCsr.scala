@@ -13,6 +13,7 @@ import spinal.lib.fsm._
 object RvCsrFile {
   def init: RvCsrFile = {
     val x = RvCsrFile()
+    x.priv := RvPrivLevel.M
     x.mcycle := 0
     x.minstret := 0
     x.brMiss := 0
@@ -22,11 +23,20 @@ object RvCsrFile {
     x.mcause := 0
     x.mtval := 0
     x.mtvec := 0
+    x.mstatus.mie := False
+    x.mstatus.mpie := False
+    x.mstatus.mpp := 0
     x
   }
 }
 
+object RvPrivLevel extends SpinalEnum(binarySequential) {
+  val U, M = newElement()
+}
+
 case class RvCsrFile() extends Bundle {
+  val priv = RvPrivLevel()
+
   val mcycle = UInt(64 bits)
   val minstret = UInt(64 bits)
   val brMiss = UInt(64 bits)
@@ -36,6 +46,29 @@ case class RvCsrFile() extends Bundle {
   val mcause = UInt(32 bits)
   val mtval = UInt(32 bits)
   val mtvec = UInt(32 bits)
+  val mstatus = RvMstatus()
+}
+
+case class RvMstatus() extends Bundle {
+  val mie = Bool()
+  val mpie = Bool()
+  val mpp = Bits(2 bits)
+
+  def decodeFromBits_lower(bits: Bits): RvMstatus = {
+    mie := bits(3)
+    mpie := bits(7)
+    mpp := bits(12 downto 11)
+    this
+  }
+
+  def encodeToBits_lower(): Bits = {
+    val out = Bits(32 bits)
+    out := 0
+    out(3) := mie
+    out(7) := mpie
+    out(12 downto 11) := mpp
+    out
+  }
 }
 
 case class RvCsrFileReg() extends Area {
@@ -170,6 +203,19 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
       intent.on(
         Seq(0xc84),
         csr.csrFile.brHit(63 downto 32).asBits
+      )
+
+      // mstatus
+      intent.on(
+        Seq(0x300),
+        csr.csrFile.mstatus.encodeToBits_lower(),
+        x => csr.csrFile.mstatus.decodeFromBits_lower(x)
+      )
+
+      // mstatush
+      intent.on(
+        Seq(0x310),
+        0
       )
 
       // mtvec
