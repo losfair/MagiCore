@@ -49,3 +49,4 @@ metals.sbt
 
 /.bsp/
 /.vscode/
+log
