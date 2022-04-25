@@ -99,7 +99,7 @@ class TestBackendPipeline extends AnyFunSuite {
   case class MockPayload() extends Bundle with PolymorphicDataChain {
     val decode = DecodeInfo(null)
     val const = UInt(32 bits)
-    val useConst = Bool()
+    val replaceOperandBwithConst = Bool()
     val opc = GenericOpcode()
     val brCtx = AluBranchContext(globalHistoryWidth = 8 bits)
     val setPredicateInsteadOfBranch = Bool()
@@ -112,7 +112,7 @@ class TestBackendPipeline extends AnyFunSuite {
         op.const := const.asBits
         op.opcode := GenericOpcode.translateToAlu(opc)._2
         op.predicated := False
-        op.useConst := useConst
+        op.replaceOperandBwithConst := replaceOperandBwithConst
         op.brCond := GenericOpcode.getBrCond(opc)
         op.setPredicateInsteadOfBranch := setPredicateInsteadOfBranch
         Some(op.asInstanceOf[T])
@@ -171,7 +171,8 @@ class TestBackendPipeline extends AnyFunSuite {
         const: Option[BigInt] = None,
         setPredicateInsteadOfBranch: Boolean = false,
         opc: SpinalEnumElement[GenericOpcode.type],
-        predictedBranch: Option[BigInt] = None
+        predictedBranch: Option[BigInt] = None,
+        doNotUseConst: Boolean = false
     ) {
       out.decode.archSrcRegs(0).valid #= rs1.isDefined
       out.decode.archSrcRegs(0).index #= rs1.getOrElse(0)
@@ -181,7 +182,7 @@ class TestBackendPipeline extends AnyFunSuite {
       out.decode.archDstRegs(0).index #= rd.getOrElse(0)
       out.decode.functionUnitTag.asInstanceOf[TestTag].tag #= t
       out.const #= const.getOrElse(BigInt(0))
-      out.useConst #= const.isDefined
+      out.replaceOperandBwithConst #= const.isDefined && !doNotUseConst
       out.setPredicateInsteadOfBranch #= setPredicateInsteadOfBranch
       out.brCtx.pc #= 0
       out.brCtx.predictedBranchValid #= predictedBranch.isDefined
@@ -969,7 +970,8 @@ class TestBackendPipeline extends AnyFunSuite {
                   const = Some(12),
                   rd = None,
                   opc = GenericOpcode.BLTU,
-                  predictedBranch = predicted
+                  predictedBranch = predicted,
+                  doNotUseConst = true
                 )
               })
             }

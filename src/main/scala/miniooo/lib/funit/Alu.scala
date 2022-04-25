@@ -43,7 +43,7 @@ case class AluOperation() extends Bundle with PolymorphicDataChain {
   val predicated = Bool()
   val alu32 = Bool()
   val const = Machine.get[MachineSpec].dataType
-  val useConst = Bool()
+  val replaceOperandBwithConst = Bool()
 
   // Branch control
   val setPredicateInsteadOfBranch = Bool()
@@ -113,13 +113,13 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
       })
 
       val a = srcRegValues(0)
-      val b = op.useConst ? op.const.asUInt | srcRegValues(1)
+      val b = op.replaceOperandBwithConst ? op.const.asUInt | srcRegValues(1)
       out.token := dispatchInfo.lookup[CommitToken]
       out.exception := MachineException.idle
 
-      val condLt = srcRegValues(0).asSInt < srcRegValues(1).asSInt
-      val condLtu = srcRegValues(0) < srcRegValues(1)
-      val condEq = srcRegValues(0) === srcRegValues(1)
+      val condLt = a.asSInt < b.asSInt
+      val condLtu = a < b
+      val condEq = a === b
       val condLe = condLt || condEq
       val condGt = !condLe
       val condGe = !condLt
@@ -253,7 +253,7 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
           }
           is(AluOpcode.DYN_BRANCH) {
             when(io_input.valid) {
-              assert(op.useConst, "DYN_BRANCH must use a constant")
+              assert(op.replaceOperandBwithConst, "DYN_BRANCH must use a constant")
             }
             val target = (a + op.const.asUInt.resized).asBits
             outValue := linkValue

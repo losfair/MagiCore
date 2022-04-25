@@ -2,7 +2,7 @@
 
 # defaults
 SIM ?= verilator
-EXTRA_ARGS += -Wno-WIDTH -Wno-CMPCONST -Wno-PINMISSING -DSYNTHESIS=1 # --trace --trace-structs
+EXTRA_ARGS += -Wno-WIDTH -Wno-CMPCONST -Wno-PINMISSING --trace --trace-structs
 #SIM ?= icarus
 TOPLEVEL_LANG ?= verilog
 

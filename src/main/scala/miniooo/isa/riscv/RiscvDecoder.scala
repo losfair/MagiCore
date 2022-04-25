@@ -26,20 +26,25 @@ object ImmType extends SpinalEnum(binarySequential) {
     val E = RvEncoding
     val imm = E.IMM(insn)
     val out = Bits(32 bits)
-    val ok = True
+    val replaceOperandBwithConst = False
     switch(me) {
-      is(I) { out := imm.i_sext }
+      is(I) {
+        out := imm.i_sext
+        replaceOperandBwithConst := True
+      }
       is(H) { out := imm.h_sext }
       is(S) { out := imm.s_sext }
       is(B) { out := imm.b_sext }
       is(J) { out := imm.j_sext }
-      is(U) { out := imm.u }
+      is(U) {
+        out := imm.u
+        replaceOperandBwithConst := True
+      }
       default {
         out.assignDontCare()
-        ok := False
       }
     }
-    (ok, out)
+    (replaceOperandBwithConst, out)
   }
 }
 
@@ -98,8 +103,9 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
           ) ? AluBranchCondition.LTU | AluBranchCondition.LT) // SLT/SLTU
         )
 
-      val (useConst, const) = ImmType.interpret(immType, fetch.insn)
-      x.useConst := useConst
+      val (replaceOperandBwithConst, const) =
+        ImmType.interpret(immType, fetch.insn)
+      x.replaceOperandBwithConst := replaceOperandBwithConst
       x.const := const
 
       val preOpcode =
@@ -107,7 +113,7 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
           6 downto 2
         )
       x.opcode := preOpcode.mux(
-        M"0000-100" -> useConst.mux(
+        M"0000-100" -> replaceOperandBwithConst.mux(
           True -> AluOpcode.ADD.craft(),
           False -> fetch
             .insn(30)

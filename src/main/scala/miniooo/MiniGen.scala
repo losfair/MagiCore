@@ -69,7 +69,7 @@ class MiniGen extends Component {
   case class MockPayload() extends Bundle with PolymorphicDataChain {
     val decode = DecodeInfo(null)
     val const = UInt(32 bits)
-    val useConst = Bool()
+    val replaceOperandBwithConst = Bool()
     val opc = GenericOpcode()
     val alu32 = Bool()
     def parentObjects: Seq[Data] = Seq(decode)
@@ -81,7 +81,7 @@ class MiniGen extends Component {
         op.const := const.asBits.resized
         op.opcode := GenericOpcode.translateToAlu(opc)._2
         op.predicated := False
-        op.useConst := useConst
+        op.replaceOperandBwithConst := replaceOperandBwithConst
         op.fillBranchFieldsForNonBranch()
         Some(op.asInstanceOf[T])
       } else if (ctag == classTag[DividerOperation]) {
