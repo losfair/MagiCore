@@ -103,6 +103,7 @@ case class MachineException() extends Bundle {
   def brTaken = context4
 
   def memoryError_accessAddr = context2
+  def extInterrupt_cause = context2(3 downto 0)
 
   def resetArea[T](f: => T): T = {
     new ResetArea(reset = valid, cumulative = true) {
@@ -144,13 +145,16 @@ object FullMachineException {
 }
 
 object MachineExceptionCode extends SpinalEnum(binarySequential) {
-  val BRANCH_MISS, INSN_CACHE_MISS, DECODE_ERROR, DIVIDE_ERROR, SERIALIZE, MEMORY_ERROR, INSN_CACHE_FLUSH, EXCEPTION_RETURN = newElement()
+  val BRANCH_MISS, INSN_CACHE_MISS, DECODE_ERROR, DIVIDE_ERROR, SERIALIZE,
+      MEMORY_ERROR, INSN_CACHE_FLUSH, EXCEPTION_RETURN, INSN_ALIGNMENT_ERROR, EXT_INTERRUPT = newElement()
 
-  def shouldSuppressWriteback(code: SpinalEnumCraft[MachineExceptionCode.type]): Bool = {
+  def shouldSuppressWriteback(
+      code: SpinalEnumCraft[MachineExceptionCode.type]
+  ): Bool = {
     code.mux(
       BRANCH_MISS -> False,
       SERIALIZE -> False,
-      default ->  True
+      default -> True
     )
   }
 }

@@ -147,6 +147,7 @@ class TestBackendPipeline extends AnyFunSuite {
           GenericOpcode.SERIALIZE -> EarlyExceptionCode.SERIALIZE.craft(),
           default -> EarlyExceptionCode.DECODE_ERROR.craft()
         )
+        op.interruptCause.assignDontCare()
         Some(op.asInstanceOf[T])
       } else {
         None

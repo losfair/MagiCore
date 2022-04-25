@@ -7,13 +7,15 @@ import miniooo.control._
 import miniooo.util.MultiLaneFifo
 
 object EarlyExceptionCode extends SpinalEnum(binarySequential) {
-  val DECODE_ERROR, CACHE_MISS, SERIALIZE, INSN_CACHE_FLUSH, EXCEPTION_RETURN =
+  val DECODE_ERROR, CACHE_MISS, SERIALIZE, INSN_CACHE_FLUSH, EXCEPTION_RETURN,
+      INSN_ALIGNMENT_ERROR, EXT_INTERRUPT =
     newElement()
 }
 
 case class EarlyException() extends Bundle with PolymorphicDataChain {
   def parentObjects = Seq()
   val code = EarlyExceptionCode()
+  val interruptCause = UInt(4 bits)
 }
 
 class EarlyExcPassthrough(staticTagData: => Data) extends FunctionUnit {
@@ -37,6 +39,7 @@ class EarlyExcPassthrough(staticTagData: => Data) extends FunctionUnit {
       val token = io_input.payload.lookup[CommitToken]
       out.regWriteValue.assignDontCare()
       out.token := token
+      out.exception.assignDontCare()
       out.exception.valid := True
 
       switch(op.code) {
@@ -55,9 +58,14 @@ class EarlyExcPassthrough(staticTagData: => Data) extends FunctionUnit {
         is(EarlyExceptionCode.EXCEPTION_RETURN) {
           out.exception.code := MachineExceptionCode.EXCEPTION_RETURN
         }
+        is(EarlyExceptionCode.INSN_ALIGNMENT_ERROR) {
+          out.exception.code := MachineExceptionCode.INSN_ALIGNMENT_ERROR
+        }
+        is(EarlyExceptionCode.EXT_INTERRUPT) {
+          out.exception.code := MachineExceptionCode.EXT_INTERRUPT
+          out.exception.extInterrupt_cause := op.interruptCause.asBits
+        }
       }
-
-      out.exception.assignUnassignedByName(MachineException.idle)
 
       io_output <-/< io_input.translateWith(out)
     }

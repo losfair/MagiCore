@@ -76,6 +76,8 @@ case class RiscvProcessor(
   )
   fetch.io.output >> decode.io.input
 
+  decode.io.intrInjection.setIdle()
+
   Machine.get[MachineException].resetArea {
     decode.io.output >/-> pipeline.io.input
   }

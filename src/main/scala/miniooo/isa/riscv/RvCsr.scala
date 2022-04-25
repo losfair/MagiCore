@@ -218,11 +218,19 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
         val exc = fullExc.exc
         val fetch = fullExc.lookup[FetchPacket]
 
-        val excRestartPC = (csr.csrFile.mtvec(csr.csrFile.mtvec.getWidth - 1 downto 2) ## B"00").asUInt
-        def restartIntoException(mcause: Int, mtval: UInt) {
+        val excRestartPC = (csr.csrFile.mtvec(
+          csr.csrFile.mtvec.getWidth - 1 downto 2
+        ) ## B"00").asUInt
+        def restartIntoException(
+            mcause: UInt,
+            mtval: UInt,
+            interrupt: Boolean = false
+        ) {
           restartIt_reg := True
           restartPC_reg := excRestartPC
-          csr.csrFile.mcause := mcause
+          csr.csrFile.mcause := (Bool(interrupt).asBits ## mcause.resize(
+            31 bits
+          )).asUInt
           csr.csrFile.mepc := fetch.pc
           csr.csrFile.mtval := mtval
         }
@@ -236,6 +244,11 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
             is(MachineExceptionCode.MEMORY_ERROR) {
               // Load access fault
               restartIntoException(5, exc.memoryError_accessAddr.asUInt)
+            }
+            is(MachineExceptionCode.EXT_INTERRUPT) {
+              // External interrupt.
+              // TODO: Vectored interrupt
+              restartIntoException(exc.extInterrupt_cause.asUInt, 0, true)
             }
             is(MachineExceptionCode.EXCEPTION_RETURN) {
               // MRET

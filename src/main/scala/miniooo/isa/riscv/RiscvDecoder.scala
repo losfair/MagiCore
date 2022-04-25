@@ -160,6 +160,10 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
   }
 }
 
+case class DecodeIntrInjectionInfo() extends Bundle {
+  val cause = UInt(4 bits)
+}
+
 case class RiscvDecoder(
     aluPort: Data,
     earlyExceptionPort: Data,
@@ -177,6 +181,7 @@ case class RiscvDecoder(
     val input = Stream(FetchPacket())
     val output = Stream(DecodePacket())
     val branchInfoFeedback = BranchInfoFeedback()
+    val intrInjection = Flow(DecodeIntrInjectionInfo())
   }
 
   val exc = Machine.get[MachineException]
@@ -201,6 +206,12 @@ case class RiscvDecoder(
   when(out.fetch.cacheMiss) {
     outPatched.fuTag := earlyExceptionPort
     outPatched.earlyExc.code := EarlyExceptionCode.CACHE_MISS
+  }
+
+  when(io.intrInjection.valid) {
+    outPatched.fuTag := earlyExceptionPort
+    outPatched.earlyExc.code := EarlyExceptionCode.EXT_INTERRUPT
+    outPatched.earlyExc.interruptCause := io.intrInjection.payload.cause
   }
 
   io.output << io.input.translateWith(outPatched)
