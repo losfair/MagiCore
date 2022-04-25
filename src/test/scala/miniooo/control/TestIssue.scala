@@ -179,8 +179,8 @@ class TestIssue extends AnyFunSuite {
       dut.io.simDispatchWrite.valid #= false
 
       dut.clockDomain.forkStimulus(100)
-      waitUntil(dut.clockDomain.isResetAsserted)
-      waitUntil(dut.clockDomain.isResetDeasserted)
+      dut.clockDomain.waitSamplingWhere(dut.clockDomain.isResetAsserted)
+      dut.clockDomain.waitSamplingWhere(dut.clockDomain.isResetDeasserted)
 
       var cycles = BigInt(0)
       fork {

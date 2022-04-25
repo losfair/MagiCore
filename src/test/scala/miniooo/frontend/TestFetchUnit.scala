@@ -129,8 +129,8 @@ class TestFetchUnit extends AnyFunSuite {
         dut.io.fetchOut.ready #= false
 
         dut.clockDomain.forkStimulus(100)
-        waitUntil(dut.clockDomain.isResetAsserted)
-        waitUntil(dut.clockDomain.isResetDeasserted)
+        dut.clockDomain.waitSamplingWhere(dut.clockDomain.isResetAsserted)
+        dut.clockDomain.waitSamplingWhere(dut.clockDomain.isResetDeasserted)
 
         fork {
           for (i <- 0 until 1000000) {

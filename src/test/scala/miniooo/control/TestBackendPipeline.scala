@@ -259,8 +259,8 @@ class TestBackendPipeline extends AnyFunSuite {
         dut.io.memBus.r.valid #= false
 
         dut.clockDomain.forkStimulus(100)
-        waitUntil(dut.clockDomain.isResetAsserted)
-        waitUntil(dut.clockDomain.isResetDeasserted)
+        dut.clockDomain.waitSamplingWhere(dut.clockDomain.isResetAsserted)
+        dut.clockDomain.waitSamplingWhere(dut.clockDomain.isResetDeasserted)
 
         if (debug) fork {
           var cycles = 0
