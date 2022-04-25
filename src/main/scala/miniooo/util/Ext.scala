@@ -122,10 +122,10 @@ object MiniOoOExt {
       val wordSizeInBytes = wordWidth / 8
 
       val file = new File(filename)
+      var bytes: Array[Byte] = new Array[Byte](file.length.toInt)
       val in = new FileInputStream(file)
-      var bytes: Array[Byte] = null
       try {
-        bytes = in.readAllBytes()
+        in.read(bytes)
       } finally {
         in.close()
       }
