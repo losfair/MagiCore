@@ -299,7 +299,14 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
             is(MachineExceptionCode.EXCEPTION_RETURN) {
               // MRET
               restartIt_reg := True
-              restartPC_reg := csr.csrFile.mepc + 4
+              restartPC_reg := csr.csrFile.mepc
+            }
+            is(MachineExceptionCode.ENV_CALL) {
+              // ecall
+              restartIntoException(csr.csrFile.priv.mux(
+                RvPrivLevel.U -> U(8, 4 bits),
+                RvPrivLevel.M -> U(11, 4 bits)
+              ), 0)
             }
             default {}
           }

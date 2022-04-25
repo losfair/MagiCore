@@ -8,7 +8,7 @@ import miniooo.util.MultiLaneFifo
 
 object EarlyExceptionCode extends SpinalEnum(binarySequential) {
   val DECODE_ERROR, CACHE_MISS, SERIALIZE, INSN_CACHE_FLUSH, EXCEPTION_RETURN,
-      INSN_ALIGNMENT_ERROR, EXT_INTERRUPT =
+      INSN_ALIGNMENT_ERROR, EXT_INTERRUPT, ENV_CALL =
     newElement()
 }
 
@@ -64,6 +64,9 @@ class EarlyExcPassthrough(staticTagData: => Data) extends FunctionUnit {
         is(EarlyExceptionCode.EXT_INTERRUPT) {
           out.exception.code := MachineExceptionCode.EXT_INTERRUPT
           out.exception.extInterrupt_cause := op.interruptCause.asBits
+        }
+        is(EarlyExceptionCode.ENV_CALL) {
+          out.exception.code := MachineExceptionCode.ENV_CALL
         }
       }
 

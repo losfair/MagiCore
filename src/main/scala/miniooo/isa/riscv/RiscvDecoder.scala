@@ -358,6 +358,11 @@ case class RiscvDecoder(
       out.immType := ImmType.X
       out.earlyExc.code := EarlyExceptionCode.EXCEPTION_RETURN
     }
+    is(E.ECALL) {
+      out.fuTag := earlyExceptionPort
+      out.immType := ImmType.X
+      out.earlyExc.code := EarlyExceptionCode.ENV_CALL
+    }
     default {
       out.fuTag := earlyExceptionPort
       out.immType := ImmType.X
