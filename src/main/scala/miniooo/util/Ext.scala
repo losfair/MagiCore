@@ -138,7 +138,10 @@ object MiniOoOExt {
       }
 
       val content =
-        bytes.grouped(wordSizeInBytes).map(x => BigInt(x.reverse)).toSeq
+        bytes
+          .grouped(wordSizeInBytes)
+          .map(x => BigInt((x ++ Array(0.toByte)).reverse))
+          .toSeq
       mem.initBigInt(content)
     }
   }

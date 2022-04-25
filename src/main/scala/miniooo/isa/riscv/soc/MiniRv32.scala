@@ -10,6 +10,9 @@ import miniooo.lib.funit._
 import miniooo.isa.riscv._
 import spinal.lib.bus.amba4.axi._
 import spinal.lib.bus.misc.SizeMapping
+import spinal.lib.com.uart.Axi4UartCtrl
+import spinal.lib.com.uart.UartCtrlMemoryMappedConfig
+import spinal.lib.com.uart.Uart
 
 case class MiniRv32() extends Component {
   val debug = false
@@ -34,25 +37,56 @@ case class MiniRv32() extends Component {
     idWidth = slaveIdWidth
   )
 
+  val uart = Axi4UartCtrl(
+    idWidth = slaveIdWidth,
+    config = UartCtrlMemoryMappedConfig(
+      baudrate = 115200,
+      txFifoDepth = 16,
+      rxFifoDepth = 16,
+      writeableConfig = true,
+      clockDividerWidth = 20
+    )
+  )
+
   val io = new Bundle {
-    val bus = master(Axi4(Axi4Config(
-      addressWidth = 32,
-      dataWidth = 32,
-      idWidth = slaveIdWidth
-    )))
+    val bus = master(
+      Axi4(
+        Axi4Config(
+          addressWidth = 32,
+          dataWidth = 32,
+          idWidth = slaveIdWidth
+        )
+      )
+    )
+    val uart = master(Uart())
   }
 
-  val bootromReadOnly = bootrom.io.axi.toAxi4ReadOnly()
+  io.uart <> uart.io.uart
 
   var axiCrossbar = Axi4CrossbarFactory()
   axiCrossbar.addSlaves(
-    bootromReadOnly -> SizeMapping(0x00010000, 16384),
+    bootrom.io.axi -> SizeMapping(0x00010000, 16384), // TODO: Error on writes
     ocram.io.axi -> SizeMapping(0x00020000, 65536),
-    io.bus -> SizeMapping(0x40000000, 2 GiB)
+    io.bus -> SizeMapping(0x40000000, 2 GiB),
+    uart.io.axi -> SizeMapping(BigInt("ff010000", 16), 0x1000)
   )
   axiCrossbar.addConnections(
-    processor.io.iBus -> Seq(bootromReadOnly, ocram.io.axi, io.bus),
-    processor.io.dBus -> Seq(bootromReadOnly, ocram.io.axi, io.bus)
+    processor.io.iBus -> Seq(bootrom.io.axi, ocram.io.axi, io.bus),
+    processor.io.dBus -> Seq(bootrom.io.axi, ocram.io.axi, io.bus, uart.io.axi)
   )
   axiCrossbar.build()
+}
+
+object MiniRv32SyncReset {
+  object SyncResetSpinalConfig
+      extends SpinalConfig(
+        defaultConfigForClockDomains = ClockDomainConfig(resetKind = SYNC),
+        defaultClockDomainFrequency = FixedFrequency(50 MHz)
+      )
+
+  def main(args: Array[String]) {
+    SyncResetSpinalConfig.generateVerilog(Machine.build {
+      new MiniRv32()
+    })
+  }
 }
