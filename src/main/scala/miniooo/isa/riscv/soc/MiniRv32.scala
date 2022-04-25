@@ -41,8 +41,8 @@ case class MiniRv32() extends Component {
     idWidth = slaveIdWidth,
     config = UartCtrlMemoryMappedConfig(
       baudrate = 115200,
-      txFifoDepth = 16,
-      rxFifoDepth = 16,
+      txFifoDepth = 32,
+      rxFifoDepth = 32,
       writeableConfig = true,
       clockDividerWidth = 20
     )
