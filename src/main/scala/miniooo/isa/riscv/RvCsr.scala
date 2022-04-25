@@ -85,11 +85,12 @@ case class RvCsrFileReg() extends Area {
   }
 }
 
-case class RvCsrFileIntent(data: PolymorphicDataChain) extends Area {
+case class RvCsrFileIntent(data: Stream[_ <: PolymorphicDataChain])
+    extends Area {
   private val mspec = Machine.get[MachineSpec]
 
-  val fetch = data.lookup[FetchPacket]
-  val issue = data.lookup[IssuePort[_]]
+  val fetch = data.payload.lookup[FetchPacket]
+  val issue = data.payload.lookup[IssuePort[_]]
 
   val useConst = fetch.insn(14)
   val src =
@@ -111,21 +112,21 @@ case class RvCsrFileIntent(data: PolymorphicDataChain) extends Area {
       switch(op) {
         is(B"01") {
           // CSRRW
-          if (write != null) write(src)
+          if (write != null) when(data.fire) { write(src) }
           out := value.resized
           ok := True
         }
         is(B"10") {
           // CSRRS
           val newValue = value | src.resized
-          if (write != null) write(newValue)
+          if (write != null) when(data.fire) { write(newValue) }
           out := value.resized
           ok := True
         }
         is(B"11") {
           // CSRRC
           val newValue = value & (~src).resized
-          if (write != null) write(newValue)
+          if (write != null) when(data.fire) { write(newValue) }
           out := value.resized
           ok := True
         }
@@ -158,7 +159,7 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
       val buffered_output = Stream(CommitRequest(null))
       io_output << buffered_output.pipelined(m2s = true)
 
-      val intent = RvCsrFileIntent(buffered_input.payload)
+      val intent = RvCsrFileIntent(buffered_input)
       val commit = CommitRequest(null)
 
       commit.token := buffered_input.payload.lookup[CommitToken]
@@ -303,10 +304,13 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
             }
             is(MachineExceptionCode.ENV_CALL) {
               // ecall
-              restartIntoException(csr.csrFile.priv.mux(
-                RvPrivLevel.U -> U(8, 4 bits),
-                RvPrivLevel.M -> U(11, 4 bits)
-              ), 0)
+              restartIntoException(
+                csr.csrFile.priv.mux(
+                  RvPrivLevel.U -> U(8, 4 bits),
+                  RvPrivLevel.M -> U(11, 4 bits)
+                ),
+                0
+              )
             }
             default {}
           }
