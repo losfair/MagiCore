@@ -1,4 +1,4 @@
-package miniooo.control
+package magicore.control
 
 import spinal.core._
 import spinal.lib._
@@ -6,16 +6,16 @@ import spinal.sim._
 import spinal.core.sim._
 
 import org.scalatest.funsuite.AnyFunSuite
-import miniooo.util.PolymorphicDataChain
+import magicore.util.PolymorphicDataChain
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
-import miniooo.testutil.TestExt._
+import magicore.testutil.TestExt._
 import scala.collection.mutable
-import miniooo.lib.funit._
+import magicore.lib.funit._
 import scala.reflect._
 import spinal.lib.bus.amba4.axi._
 import spinal.lib.bus.misc.SizeMapping
-import miniooo.testutil.TestSyncResetSpinalConfig
+import magicore.testutil.TestSyncResetSpinalConfig
 
 class TestBackendPipeline extends AnyFunSuite {
   object TestTag {

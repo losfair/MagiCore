@@ -1,21 +1,21 @@
-package miniooo.isa.riscv
+package magicore.isa.riscv
 
 import spinal.core._
 import spinal.lib._
 import spinal.sim._
 import spinal.core.sim._
 
-import miniooo.control._
-import miniooo.frontend._
+import magicore.control._
+import magicore.frontend._
 import org.scalatest.funsuite.AnyFunSuite
-import miniooo.util.PolymorphicDataChain
+import magicore.util.PolymorphicDataChain
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
-import miniooo.testutil.TestExt._
+import magicore.testutil.TestExt._
 import scala.collection.mutable
 import spinal.lib.bus.amba4.axi._
 import spinal.lib.bus.misc.SizeMapping
-import miniooo.testutil.TestSyncResetSpinalConfig
+import magicore.testutil.TestSyncResetSpinalConfig
 
 class TestRiscv extends AnyFunSuite {
   val debug = false

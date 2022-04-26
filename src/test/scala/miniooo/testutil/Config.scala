@@ -1,4 +1,4 @@
-package miniooo.testutil
+package magicore.testutil
 
 import spinal.core._
 import spinal.lib._

@@ -2,7 +2,7 @@ import mill._, scalalib._
 
 val spinalVersion = "1.6.0"
 
-object miniooo extends SbtModule {
+object magicore extends SbtModule {
   def scalaVersion = "2.12.14"
   override def millSourcePath = os.pwd
   def ivyDeps = Agg(
