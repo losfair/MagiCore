@@ -58,6 +58,8 @@ case class AluOperation() extends Bundle with PolymorphicDataChain {
 class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
   private val spec = Machine.get[MachineSpec]
 
+  private var effInst: EffectInstance = null
+
   def staticTag: Data = staticTagData
   override def isAlu: Boolean = true
   override def generate(
@@ -81,13 +83,13 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
     new FunctionUnitInstance {
       val io_available = True
       val io_input = Stream(hardType())
-      val io_output = Stream(CommitRequest(null))
+      val io_output = Stream(CommitRequest(null, genBrStats = true))
 
       val currentPredicate = Reg(Bool()) init (false)
       val predicateBuffer = Reg(spec.dataType) init (0)
 
       val in = io_input.payload
-      val out = CommitRequest(null)
+      val out = CommitRequest(null, genBrStats = true)
 
       val op = in.lookup[AluOperation]
       val decode = in.lookup[DecodeInfo]
@@ -116,6 +118,8 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
       val b = op.replaceOperandBwithConst ? op.const.asUInt | srcRegValues(1)
       out.token := dispatchInfo.lookup[CommitToken]
       out.exception := MachineException.idle
+      out.incBrHit := False
+      out.incBrMiss := False
 
       val condLt = a.asSInt < b.asSInt
       val condLtu = a < b
@@ -137,19 +141,6 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
       )
 
       val brCtx = in.tryLookup[AluBranchContext]
-      val perfCtr = Machine.tryGet[AluPerfCounters]
-
-      val incBrHit = False
-      val incBrMiss = False
-
-      if (perfCtr.isDefined) when(io_input.fire) {
-        when(incBrHit) {
-          perfCtr.get.brHit := perfCtr.get.brHit + 1
-        }
-        when(incBrMiss) {
-          perfCtr.get.brMiss := perfCtr.get.brMiss + 1
-        }
-      }
 
       val outValue = UInt(out.regWriteValue(0).getWidth bits)
       outValue.assignDontCare()
@@ -211,7 +202,7 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
               )
             }
             outValue := linkValue
-            incBrHit := True
+            out.incBrHit := True
           }
           is(AluOpcode.BRANCH) {
             import AluBranchCondition._
@@ -245,15 +236,18 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
                 out.exception.brDstAddr := computedTarget
                 out.exception.brIsConst := True
                 out.exception.brTaken := cond
-                incBrMiss := True
+                out.incBrMiss := True
               } otherwise {
-                incBrHit := True
+                out.incBrHit := True
               }
             }
           }
           is(AluOpcode.DYN_BRANCH) {
             when(io_input.valid) {
-              assert(op.replaceOperandBwithConst, "DYN_BRANCH must use a constant")
+              assert(
+                op.replaceOperandBwithConst,
+                "DYN_BRANCH must use a constant"
+              )
             }
             val target = (a + op.const.asUInt.resized).asBits
             outValue := linkValue
@@ -265,9 +259,9 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
               out.exception.brDstAddr := target
               out.exception.brIsConst := False
               out.exception.brTaken := True
-              incBrMiss := True
+              out.incBrMiss := True
             } otherwise {
-              incBrHit := True
+              out.incBrHit := True
             }
           }
         }
@@ -300,7 +294,40 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
       }
 
       io_output <-< io_input.translateWith(out)
+
+      val effectLogic = new Area {
+        val perfCtr = Machine.tryGet[AluPerfCounters]
+        if (perfCtr.isDefined) {
+          val incBrHit = False
+          val incBrMiss = False
+
+          for (eff <- effInst.io_effect) {
+            when(eff.valid) {
+              val commit = eff.payload.lookup[CommitRequest]
+              when(commit.incBrHit) {
+                incBrHit := True
+              }
+              when(commit.incBrMiss) {
+                incBrMiss := True
+              }
+            }
+          }
+
+          when(incBrHit) {
+            perfCtr.get.brHit := perfCtr.get.brHit + 1
+          }
+          when(incBrMiss) {
+            perfCtr.get.brMiss := perfCtr.get.brMiss + 1
+          }
+        }
+      }
     }
+  }
+
+  override def generateEffect(): Option[EffectInstance] = {
+    val spec = Machine.get[MachineSpec]
+    effInst = new EffectInstance {}
+    Some(effInst)
   }
 
 }

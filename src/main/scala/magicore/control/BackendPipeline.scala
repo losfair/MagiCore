@@ -90,10 +90,25 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
       .asInstanceOf[Stream[PolymorphicDataChain]] >> unit.io_input
       .setCompositeName(this, "ooo_function_unit_input_" + i)
       .asInstanceOf[Stream[PolymorphicDataChain]]
-    unit.io_output.setCompositeName(
-      this,
-      "ooo_function_unit_output_" + i
-    ) >> dispatch.io.commitOoO(j)
+
+    val creq = dispatch.commitRequestType
+    if (fu.isAlu) {
+      assert(unit.io_output.payload.incBrHit != null)
+      assert(unit.io_output.payload.incBrMiss != null)
+      creq := unit.io_output.payload
+    } else {
+      assert(unit.io_output.payload.incBrHit == null)
+      assert(unit.io_output.payload.incBrMiss == null)
+      creq.assignSomeByName(unit.io_output.payload)
+      creq.incBrHit := False
+      creq.incBrMiss := False
+    }
+    unit.io_output
+      .translateWith(creq)
+      .setCompositeName(
+        this,
+        "ooo_function_unit_output_" + i
+      ) >> dispatch.io.commitOoO(j)
     oooIssue.io.issueAvailable(j) := unit.io_available
   }
 
@@ -110,17 +125,29 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
         .asInstanceOf[Stream[PolymorphicDataChain]] >> unit.io_input
         .setCompositeName(this, "ino_function_unit_input_" + i)
         .asInstanceOf[Stream[PolymorphicDataChain]]
-      unit.io_output.setCompositeName(
-        this,
-        "ino_function_unit_output_" + i
-      ) >> dispatch.io.commitInO(j)
+
+      val creq = dispatch.commitRequestType
+      assert(unit.io_output.payload.incBrHit == null)
+      assert(unit.io_output.payload.incBrMiss == null)
+      creq.assignSomeByName(unit.io_output.payload)
+      creq.incBrHit := False
+      creq.incBrMiss := False
+      unit.io_output
+        .translateWith(creq)
+        .setCompositeName(
+          this,
+          "ino_function_unit_output_" + i
+        ) >> dispatch.io.commitInO(j)
     }
 
   val io = new Bundle {
     val input = Stream(inputType)
 
     val writebackMonitor =
-      Vec(Flow(CommitRequest(dispatch.dataType, genRegWriteValue = false)), spec.writebackWidth)
+      Vec(
+        Flow(CommitRequest(dispatch.dataType, genRegWriteValue = false)),
+        spec.writebackWidth
+      )
   }
 
   io.input >> rename.io.input

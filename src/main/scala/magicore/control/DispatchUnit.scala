@@ -37,7 +37,8 @@ case class CommitToken() extends Bundle with PolymorphicDataChain {
 
 case class CommitRequest(
     hardType: HardType[_ <: PolymorphicDataChain],
-    genRegWriteValue: Boolean = true
+    genRegWriteValue: Boolean = true,
+    genBrStats: Boolean = false
 ) extends Bundle
     with PolymorphicDataChain {
   private val spec = Machine.get[MachineSpec]
@@ -49,6 +50,8 @@ case class CommitRequest(
       )
     else null
   val exception = MachineException()
+  val incBrHit = if(genBrStats) Bool() else null
+  val incBrMiss = if(genBrStats) Bool() else null
   val ctx: PolymorphicDataChain = if (hardType != null) hardType() else null
   def parentObjects = Seq(ctx, exception)
 }
@@ -57,7 +60,8 @@ case class RobEntry(hardType: HardType[_ <: PolymorphicDataChain])
     extends Bundle {
   val commitRequest = CommitRequest(
     hardType = hardType,
-    genRegWriteValue = false
+    genRegWriteValue = false,
+    genBrStats = true
   ) setCompositeName (this, "cr")
   val completed = Bool()
 }
@@ -78,8 +82,8 @@ case class DispatchUnit[T <: PolymorphicDataChain](
   private val spec = Machine.get[MachineSpec]
   private val sem = Machine.get[MachineSemantics]
 
-  def commitRequestType = CommitRequest(null)
-  def fullCommitRequestType = CommitRequest(dataType, genRegWriteValue = false)
+  def commitRequestType = CommitRequest(null, genBrStats = true)
+  def fullCommitRequestType = CommitRequest(dataType, genRegWriteValue = false, genBrStats = true)
   def outType = DispatchInfo(dataType())
   def robEntryType = RobEntry(dataType())
 
@@ -304,6 +308,8 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           newEntry.commitRequest.ctx := oldEntry.commitRequest.ctx
           newEntry.commitRequest.exception := commit.payload.exception
           newEntry.commitRequest.token := commit.payload.token
+          newEntry.commitRequest.incBrHit := commit.payload.incBrHit
+          newEntry.commitRequest.incBrMiss := commit.payload.incBrMiss
 
           val requestWrite = assignedBankIndex === i && commit.valid
           requestWrite.setCompositeName(

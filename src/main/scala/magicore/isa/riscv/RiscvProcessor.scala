@@ -37,7 +37,8 @@ case class RiscvProcessor(
     insnWidth = 32 bits,
     addrWidth = 32 bits,
     resetPc = resetPc,
-    globalHistorySize = 1024,
+    globalHistorySize = 4096,
+    btbSize = 128,
     initBranchPredictionBuffers = initBranchPredictionBuffers
   )
 

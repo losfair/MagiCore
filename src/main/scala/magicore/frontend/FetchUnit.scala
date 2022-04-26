@@ -116,6 +116,32 @@ case class FetchUnit() extends Area {
     val to = fspec.addrType()
   }
 
+  object GsharePreference extends SpinalEnum(binarySequential) {
+    val stronglyNotTaken, weaklyNotTaken, weaklyTaken, stronglyTaken =
+      newElement()
+
+    def inc(
+        x: SpinalEnumCraft[GsharePreference.type]
+    ): SpinalEnumCraft[GsharePreference.type] = {
+      x.mux(
+        stronglyNotTaken -> weaklyNotTaken.craft(),
+        weaklyNotTaken -> weaklyTaken.craft(),
+        weaklyTaken -> stronglyTaken.craft(),
+        stronglyTaken -> stronglyTaken.craft()
+      )
+    }
+    def dec(
+        x: SpinalEnumCraft[GsharePreference.type]
+    ): SpinalEnumCraft[GsharePreference.type] = {
+      x.mux(
+        stronglyNotTaken -> stronglyNotTaken.craft(),
+        weaklyNotTaken -> stronglyNotTaken.craft(),
+        weaklyTaken -> weaklyNotTaken.craft(),
+        stronglyTaken -> weaklyTaken.craft()
+      )
+    }
+  }
+
   // PC generation
   val pcStreamGen = new Area {
     val valid = Reg(Bool()) init (true)
@@ -219,22 +245,20 @@ case class FetchUnit() extends Area {
       def idle: GshareEntry = {
         val x = GshareEntry()
         x.valid := False
-        x.taken := False
+        x.taken := GsharePreference.weaklyTaken
         x
       }
     }
+
     case class GshareEntry() extends Bundle {
       val valid = Bool()
-      val taken = Bool()
+      val taken = GsharePreference()
     }
     val gshareMem = Mem(GshareEntry(), fspec.globalHistorySize)
     if (fspec.initBranchPredictionBuffers)
-      gshareMem.init((0 until fspec.globalHistorySize).map(_ => {
-        val e = GshareEntry()
-        e.valid := False
-        e.taken := False
-        e
-      }))
+      gshareMem.init(
+        (0 until fspec.globalHistorySize).map(_ => GshareEntry.idle)
+      )
 
     val gshareMemWriteValid = False
     val gshareMemWriteAddr = UInt(fspec.globalHistoryWidth) assignDontCare ()
@@ -250,7 +274,13 @@ case class FetchUnit() extends Area {
       val decision = False
       when(io.branchInfoFeedback.isConditionalBranch) {
         when(gshareQuery.valid) {
-          decision := gshareQuery.taken
+          when(gshareQuery.taken === GsharePreference.stronglyNotTaken) {
+            decision := False
+          } elsewhen (gshareQuery.taken === GsharePreference.weaklyNotTaken || gshareQuery.taken === GsharePreference.weaklyTaken) {
+            decision := io.branchInfoFeedback.backward
+          } otherwise {
+            decision := True
+          }
         } otherwise {
           // Predict backward branches to be taken by default, if dynamic information is not available
           decision := io.branchInfoFeedback.backward
@@ -398,11 +428,16 @@ case class FetchUnit() extends Area {
           False -> nextPCforTheirFetchPacket,
           True -> exc.exc.brDstAddr.asUInt
         )
-        s2.gshareMemWriteAddr := (theirFetchPacket.globalHistory.resize(
+
+        val addr = (theirFetchPacket.globalHistory.resize(
           s2.gshareMemWriteAddr.getWidth
         ) ^ pcWordAddr(theirFetchPacket.pc).asBits.resized).asUInt
+        val prev = s2.gshareMem(addr)
+        s2.gshareMemWriteAddr := addr
         s2.gshareMemWriteData.valid := True
-        s2.gshareMemWriteData.taken := exc.exc.brTaken
+        s2.gshareMemWriteData.taken := exc.exc.brTaken ? GsharePreference.inc(
+          prev.taken
+        ) | GsharePreference.dec(prev.taken)
 
         when(exc.exc.brIsConst) {
           speculatedGlobalHistory := theirFetchPacket.globalHistory(
