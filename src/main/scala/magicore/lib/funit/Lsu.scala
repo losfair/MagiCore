@@ -174,12 +174,12 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
       val arbitratedStream = StreamArbiterFactory.lowerFirst.on(
         Seq(outStream_oooRead.stage(), outStream_pipeline.stage())
       )
-      arbitratedStream >/-> io_output
+      arbitratedStream >> io_output
 
       val axiM = Axi4(axiConfig)
-      axiM.ar >-> io_axiMaster.ar
-      axiM.aw >-> io_axiMaster.aw
-      axiM.w >-> io_axiMaster.w
+      axiM.ar >> io_axiMaster.ar
+      axiM.aw >> io_axiMaster.aw
+      axiM.w >> io_axiMaster.w
       axiM.r << io_axiMaster.r.s2mPipe()
       axiM.b << io_axiMaster.b
 
