@@ -265,8 +265,7 @@ class TestBackendPipeline extends AnyFunSuite {
       .withWave
       .doSim(
         rtl = Machine.build { new TestBackendPipelineTop(debug = debug) },
-        name = "test",
-        seed = 1078234688
+        name = "test"
       ) { dut =>
         dut.io.input.valid #= false
         dut.io.memBus.arw.ready #= false
