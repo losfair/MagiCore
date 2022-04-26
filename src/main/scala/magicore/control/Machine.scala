@@ -59,15 +59,30 @@ object Machine {
     }
   }
 
-  def report(data: Seq[Any]) {
+  def isDebugEnabled: Boolean = {
     try {
       get[MachineDebugMarker.type]
     } catch {
       case _: Exception => {
-        return
+        return false
       }
     }
-    spinal.core.report(data)
+
+    true
+  }
+
+  def debugGen[T <: AnyRef](f: => T): T = {
+    if (isDebugEnabled) {
+      f
+    } else {
+      null.asInstanceOf[T]
+    }
+  }
+
+  def report(data: => Seq[Any]) {
+    debugGen {
+      spinal.core.report(data)
+    }
   }
 }
 
@@ -146,8 +161,8 @@ object FullMachineException {
 
 object MachineExceptionCode extends SpinalEnum(binarySequential) {
   val BRANCH_MISS, INSN_CACHE_MISS, DECODE_ERROR, DIVIDE_ERROR, SERIALIZE,
-      MEMORY_ERROR, INSN_CACHE_FLUSH, EXCEPTION_RETURN, INSN_ALIGNMENT_ERROR, EXT_INTERRUPT,
-      ENV_CALL = newElement()
+      MEMORY_ERROR, INSN_CACHE_FLUSH, EXCEPTION_RETURN, INSN_ALIGNMENT_ERROR,
+      EXT_INTERRUPT, ENV_CALL = newElement()
 
   def shouldSuppressWriteback(
       code: SpinalEnumCraft[MachineExceptionCode.type]

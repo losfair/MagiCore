@@ -34,14 +34,14 @@ case class CommitToken() extends Bundle with PolymorphicDataChain {
   val parentObjects = Seq()
 }
 
-case class CommitRequest(hardType: HardType[_ <: PolymorphicDataChain])
+case class CommitRequest(hardType: HardType[_ <: PolymorphicDataChain], genRegWriteValue: Boolean = true)
     extends Bundle
     with PolymorphicDataChain {
   private val spec = Machine.get[MachineSpec]
   val token = CommitToken()
-  val regWriteValue = Vec(
+  val regWriteValue = if(genRegWriteValue) Vec(
     (0 until spec.maxNumDstRegsPerInsn).map(_ => spec.dataType)
-  )
+  ) else null
   val exception = MachineException()
   val ctx: PolymorphicDataChain = if (hardType != null) hardType() else null
   def parentObjects = Seq(ctx, exception)
@@ -49,7 +49,7 @@ case class CommitRequest(hardType: HardType[_ <: PolymorphicDataChain])
 
 case class RobEntry(hardType: HardType[_ <: PolymorphicDataChain])
     extends Bundle {
-  val commitRequest = CommitRequest(hardType) setCompositeName (this, "cr")
+  val commitRequest = CommitRequest(hardType = hardType, genRegWriteValue = false) setCompositeName (this, "cr")
   val completed = Bool()
 }
 
@@ -70,7 +70,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
   private val sem = Machine.get[MachineSemantics]
 
   def commitRequestType = CommitRequest(null)
-  def fullCommitRequestType = CommitRequest(dataType)
+  def fullCommitRequestType = CommitRequest(dataType, genRegWriteValue = false)
   def outType = DispatchInfo(dataType())
   def robEntryType = RobEntry(dataType())
 
@@ -86,7 +86,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
     val oooOutput = Stream(outType)
     val inOrderOutput = Stream(outType)
     val commit = Vec(Stream(commitRequestType), sem.numFunctionUnits)
-    val writebackMonitor = Vec(Flow(CommitRequest(dataType)), spec.commitWidth)
+    val writebackMonitor = Vec(Flow(CommitRequest(dataType, genRegWriteValue = false)), spec.commitWidth)
   }
 
   val epochMgr = Machine.get[EpochManager]
@@ -252,7 +252,6 @@ case class DispatchUnit[T <: PolymorphicDataChain](
         val newEntry = robEntryType
         newEntry.completed := True
         newEntry.commitRequest.ctx := oldEntry.commitRequest.ctx
-        newEntry.commitRequest.regWriteValue := commit.payload.regWriteValue
         newEntry.commitRequest.exception := commit.payload.exception
         newEntry.commitRequest.token := commit.payload.token
 
@@ -472,6 +471,8 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           x._2.io_effect(i).payload := eff
         })
 
+        val physValue_debug = Machine.debugGen { renameInfo.physDstRegs.map(phys => prfIf.readAsync(phys)) }
+
         // Pop the item from the queue
         when(entryReady) {
           risingOccupancy := False
@@ -500,7 +501,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
                 .zip(
                   decodeInfo.archDstRegs
                 )
-                .zip(entryData.data.commitRequest.regWriteValue)
+                .zip(physValue_debug)
                 .flatMap(arg => {
                   val ((phys, arch), value) = arg
                   Seq(
@@ -511,7 +512,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
                     ",arch=",
                     arch.index,
                     ",value=",
-                    value,
+                    value.data,
                     "]"
                   )
                 })

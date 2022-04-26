@@ -217,6 +217,7 @@ class TestBackendPipeline extends AnyFunSuite {
           pipeline.io.writebackMonitor.size
         )
       )
+      val writebackRegValue = out(Vec(mspec.dataType, pipeline.io.writebackMonitor.size))
       val cycles = out(UInt(64 bits))
       val effectOutput = out(Vec(Flow(UInt(32 bits)), 2))
       val memBus = slave(Axi4Shared(lsu.io_axiMaster.config))
@@ -228,6 +229,12 @@ class TestBackendPipeline extends AnyFunSuite {
     pipeline.io.writebackMonitor
       .zip(io.writebackMonitor)
       .foreach(x => x._1 >-> x._2)
+
+    for (i <- 0 until pipeline.io.writebackMonitor.size) {
+      val rename = pipeline.io.writebackMonitor(i).lookup[RenameInfo]
+      val value = prfIf.readAsync(rename.physDstRegs(0)).data
+      io.writebackRegValue(i) := RegNext(value)
+    }
 
     val cycles = Reg(UInt(64 bits)) init (0)
     cycles := cycles + 1
@@ -258,7 +265,8 @@ class TestBackendPipeline extends AnyFunSuite {
       .withWave
       .doSim(
         rtl = Machine.build { new TestBackendPipelineTop(debug = debug) },
-        name = "test"
+        name = "test",
+        seed = 1078234688
       ) { dut =>
         dut.io.input.valid #= false
         dut.io.memBus.arw.ready #= false
@@ -391,7 +399,7 @@ class TestBackendPipeline extends AnyFunSuite {
         fork {
           while (true) {
             dut.clockDomain.waitSampling()
-            for (ch <- dut.io.writebackMonitor) {
+            for ((ch, i) <- dut.io.writebackMonitor.zipWithIndex) {
               if (ch.valid.toBoolean) {
                 val decode = ch.payload.lookup[DecodeInfo]
                 if (
@@ -403,7 +411,7 @@ class TestBackendPipeline extends AnyFunSuite {
                   val logIndex = actualWritebackLog.size
                   val (index, value) = (
                     decode.archDstRegs(0).index.toInt,
-                    ch.payload.regWriteValue(0).toBigInt
+                    dut.io.writebackRegValue(i).toBigInt
                   )
                   actualWritebackLog += ((index, value))
 

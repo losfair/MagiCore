@@ -120,7 +120,7 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
     val input = Stream(inputType)
 
     val writebackMonitor =
-      Vec(Flow(CommitRequest(dispatch.dataType)), spec.commitWidth)
+      Vec(Flow(CommitRequest(dispatch.dataType, genRegWriteValue = false)), spec.commitWidth)
   }
 
   io.input >> rename.io.input
