@@ -43,7 +43,7 @@ _lockup:
     j _lockup
 
 _intr_entry:
-    addi sp, sp, -120
+    addi sp, sp, -128
     sw x1, 0(sp)
     sw x2, 4(sp)
     sw x3, 8(sp)
@@ -116,7 +116,7 @@ asm_return_from_interrupt:
     lw x30, 116(a0)
     lw x31, 120(a0)
     lw a0, 36(a0)
-    addi sp, sp, 120
+    addi sp, sp, 128
     mret
 
 .globl do_ecall
