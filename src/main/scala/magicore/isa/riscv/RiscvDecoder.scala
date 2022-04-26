@@ -392,6 +392,11 @@ case class RiscvDecoder(
       out.immType := ImmType.X
       out.earlyExc.code := MachineExceptionCode.ENV_CALL
     }
+    is(E.WFI) {
+      out.fuTag := earlyExceptionPort
+      out.immType := ImmType.X
+      out.earlyExc.code := MachineExceptionCode.WFI
+    }
     default {
       out.fuTag := earlyExceptionPort
       out.immType := ImmType.X
