@@ -23,7 +23,6 @@ object RvCsrFile {
     x.mcause := 0
     x.mtval := 0
     x.mtvec := 0
-    x.mstatus.mie := False
     x.mstatus.mpie := False
     x.mstatus.mpp := RvPrivLevel.M
     x
@@ -52,12 +51,11 @@ case class RvCsrFile() extends Bundle {
 
 case class RvMstatus() extends Bundle {
   private val intrSvc = Machine.get[RvInterruptService]
-  def mie = intrSvc.mie
   val mpie = Bool()
   val mpp = RvPrivLevel()
 
   def decodeFromBits_lower(bits: Bits): RvMstatus = {
-    mie := bits(3)
+    intrSvc.mie := bits(3)
     mpie := bits(7)
     switch(bits(12 downto 11)) {
       is(B"00") {
@@ -73,7 +71,7 @@ case class RvMstatus() extends Bundle {
   def encodeToBits_lower(): Bits = {
     val out = Bits(32 bits)
     out := 0
-    out(3) := mie
+    out(3) := intrSvc.mie
     out(7) := mpie
     out(12 downto 11) := mpp.asBits
     out
@@ -348,8 +346,8 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
           // When a trap is taken from privilege mode y into privilege mode x,
           // x PIE is set to the value of x IE; x IE is set to 0; and x PP is set to y.
           csr.csrFile.mstatus.mpp := csr.csrFile.priv
-          csr.csrFile.mstatus.mpie := csr.csrFile.mstatus.mie
-          csr.csrFile.mstatus.mie := False
+          csr.csrFile.mstatus.mpie := intrSvc.mie
+          intrSvc.mie := False
           csr.csrFile.priv := RvPrivLevel.M
         }
 
@@ -388,7 +386,7 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
               // MIE=MPIE, and MPIE=1. Lastly, MRET sets the privilege mode as previously determined, and
               // sets pc=mepc.
               csr.csrFile.mstatus.mpp := RvPrivLevel.U
-              csr.csrFile.mstatus.mie := csr.csrFile.mstatus.mpie
+              intrSvc.mie := csr.csrFile.mstatus.mpie
               csr.csrFile.mstatus.mpie := True
             }
             is(MachineExceptionCode.ENV_CALL) {
