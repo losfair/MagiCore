@@ -42,7 +42,7 @@ class TestBackendPipeline extends AnyFunSuite {
     issueQueueSize = 16,
     functionUnitTagType = HardType(TestTag()),
     robSize = 32,
-    commitWidth = 2
+    writebackWidth = 2
   )
 
   val msem = new MachineSemantics {

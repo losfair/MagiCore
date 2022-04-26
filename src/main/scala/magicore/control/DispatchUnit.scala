@@ -100,7 +100,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
       Vec(Stream(commitRequestType), sem.functionUnits.count(x => x.inOrder))
     val writebackMonitor = Vec(
       Flow(CommitRequest(dataType, genRegWriteValue = false)),
-      spec.commitWidth
+      spec.writebackWidth
     )
   }
 
@@ -129,13 +129,13 @@ case class DispatchUnit[T <: PolymorphicDataChain](
     debugCyc := debugCyc + 1
 
     def getBankIndexForPtr(p: UInt) = p(
-      log2Up(spec.commitWidth) - 1 downto 0
+      log2Up(spec.writebackWidth) - 1 downto 0
     )
     def getEntryIndexForPtr(p: UInt) = p(
-      p.getWidth - 1 downto log2Up(spec.commitWidth)
+      p.getWidth - 1 downto log2Up(spec.writebackWidth)
     )
-    assert(spec.robSize % spec.commitWidth == 0)
-    val robBankSize = spec.robSize / spec.commitWidth
+    assert(spec.robSize % spec.writebackWidth == 0)
+    val robBankSize = spec.robSize / spec.writebackWidth
 
     val resetArea = new ResetArea(reset = reset, cumulative = true) {
       val risingOccupancy = Reg(Bool()) init (false)
@@ -155,7 +155,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
     val empty = ptrEq && !risingOccupancy
     val full = ptrEq && risingOccupancy
     val banks =
-      (0 until spec.commitWidth).map(_ =>
+      (0 until spec.writebackWidth).map(_ =>
         LvtMem(HardType(robEntryType), robBankSize)
       )
     val prfIf = Machine.get[PrfInterface]
@@ -429,7 +429,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
             val out = ReadOutput()
             out.addr := (addr_.asBits ## B(
               index,
-              log2Up(spec.commitWidth) bits
+              log2Up(spec.writebackWidth) bits
             )).asUInt
             out.data := banks(index).readAsync(address = addr_)
             out
@@ -452,10 +452,10 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           x._2.io_reset := reset
         })
 
-      var retireCount = UInt(log2Up(spec.commitWidth + 1) bits)
+      var retireCount = UInt(log2Up(spec.writebackWidth + 1) bits)
       retireCount := 0
 
-      for (i <- 0 until spec.commitWidth) {
+      for (i <- 0 until spec.writebackWidth) {
         val entryData = readOutput(i)
         val localEmpty =
           entryData.addr === pushPtr && (!risingOccupancy || Bool(i != 0))

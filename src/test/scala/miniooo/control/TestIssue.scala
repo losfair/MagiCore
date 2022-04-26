@@ -24,7 +24,7 @@ class TestIssue extends AnyFunSuite {
     issueQueueSize = 32,
     functionUnitTagType = HardType(TestTag()),
     robSize = 2,
-    commitWidth = 1
+    writebackWidth = 1
   )
   val numFunctionUnits = 4
 

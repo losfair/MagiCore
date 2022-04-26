@@ -30,7 +30,7 @@ class TestFetchUnit extends AnyFunSuite {
     issueQueueSize = 32,
     functionUnitTagType = HardType(Bool()),
     robSize = 2,
-    commitWidth = 1
+    writebackWidth = 1
   )
   val fspec = FrontendSpec(
     icacheSize = 4096,

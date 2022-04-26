@@ -31,7 +31,7 @@ class MiniGen extends Component {
     issueQueueSize = 16,
     functionUnitTagType = HardType(TestTag()),
     robSize = 64,
-    commitWidth = 2
+    writebackWidth = 2
   )
 
   val msem = new MachineSemantics {

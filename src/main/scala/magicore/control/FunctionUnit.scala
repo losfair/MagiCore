@@ -42,7 +42,7 @@ trait EffectInstance extends Area {
   val io_effect: Vec[Flow[CommitEffect]] =
     Vec(
       Flow(CommitEffect(Machine.get[FullCommitRequestType].ty)),
-      Machine.get[MachineSpec].commitWidth
+      Machine.get[MachineSpec].writebackWidth
     )
   val io_reset: Bool = Bool()
 }

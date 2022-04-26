@@ -191,7 +191,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
       val effFifo = MultiLaneFifo(
         dataType = CommitEffect(),
         depth = spec.robSize,
-        numLanes = spec.commitWidth
+        numLanes = spec.writebackWidth
       )
 
       val pendingStoreValid_posted = Vec(Reg(Bool()) init (false), spec.robSize)

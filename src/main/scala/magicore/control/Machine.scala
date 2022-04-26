@@ -16,7 +16,7 @@ case class MachineSpec(
     inOrderIssueQueueSize: Int = 16,
     functionUnitTagType: HardType[_ <: Data],
     robSize: Int,
-    commitWidth: Int
+    writebackWidth: Int
 ) {
   def dataType = Bits(dataWidth)
 

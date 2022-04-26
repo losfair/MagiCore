@@ -88,7 +88,7 @@ class DummyEffect(staticTagData: => Data, inOrder_sideEffect_enable: Boolean)
         val effFifo = MultiLaneFifo(
           dataType = CommitEffect(),
           depth = spec.robSize,
-          numLanes = spec.commitWidth
+          numLanes = spec.writebackWidth
         )
         assert(!effFifo.io.push.isStall, "effect fifo must not stall")
 

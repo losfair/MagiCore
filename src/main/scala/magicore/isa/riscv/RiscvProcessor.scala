@@ -28,7 +28,7 @@ case class RiscvProcessor(
     issueQueueSize = 16,
     functionUnitTagType = HardType(FuTag()),
     robSize = 64,
-    commitWidth = 2
+    writebackWidth = 2
   )
 
   val fspec = FrontendSpec(
