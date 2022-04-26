@@ -40,7 +40,7 @@ impl IntrContext {
 
 #[no_mangle]
 pub extern "C" fn rust_main() -> ! {
-  writeln!(UartPort, "MiniRV32 FSBL. t={}", unsafe {
+  writeln!(UartPort, "MagiCore FSBL. t={}", unsafe {
     io_read(CLINT_TIME)
   })
   .unwrap();
