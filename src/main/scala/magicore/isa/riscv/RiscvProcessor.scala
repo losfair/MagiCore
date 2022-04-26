@@ -32,7 +32,7 @@ case class RiscvProcessor(
   )
 
   val fspec = FrontendSpec(
-    icacheSize = 8192,
+    icacheSize = 16384,
     icacheMemPortDataWidth = 32,
     insnWidth = 32 bits,
     addrWidth = 32 bits,
