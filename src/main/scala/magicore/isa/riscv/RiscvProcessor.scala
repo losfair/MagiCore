@@ -15,7 +15,7 @@ case class RiscvProcessor(
     initBranchPredictionBuffers: Boolean = false
 ) extends Component {
   object FuTag extends SpinalEnum(binarySequential) {
-    val ALU, LSU, MUL, DIV, EARLY_EXC, CSR = newElement()
+    val ALU, LSU, MUL, DIV, SLOW_ALU, EARLY_EXC, CSR = newElement()
   }
 
   val mspec = MachineSpec(
@@ -58,6 +58,7 @@ case class RiscvProcessor(
       new Alu(FuTag.ALU, AluConfig(alu32 = false)),
       new Multiplier(FuTag.MUL, MultiplierConfig()),
       new Divider(FuTag.DIV, enableException = false),
+      new SlowAlu(FuTag.SLOW_ALU),
       new Lsu(FuTag.LSU, LsuConfig()),
       new EarlyExcPassthrough(FuTag.EARLY_EXC),
       new RvCsr(FuTag.CSR)
@@ -76,7 +77,8 @@ case class RiscvProcessor(
     lsuPort = FuTag.LSU,
     mulPort = FuTag.MUL,
     divPort = FuTag.DIV,
-    csrPort = FuTag.CSR
+    csrPort = FuTag.CSR,
+    slowAluPort = FuTag.SLOW_ALU
   )
   fetch.io.output >> decode.io.input
 

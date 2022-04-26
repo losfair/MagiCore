@@ -16,6 +16,8 @@ import magicore.lib.funit.DividerOperation
 import magicore.lib.funit.LsuOperationSize
 import magicore.lib.funit.EarlyException
 import magicore.lib.funit.MultiplierOperation
+import magicore.lib.funit.SlowAluOperation
+import magicore.lib.funit.SlowAluOpcode
 
 object ImmType extends SpinalEnum(binarySequential) {
   val X, I, H, S, B, J, U =
@@ -189,6 +191,20 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
         }
       }
       Some(op.asInstanceOf[T])
+    } else if (ctag == classTag[SlowAluOperation]) {
+      val op = SlowAluOperation()
+      switch(fetch.insn) {
+        is(E.CLZ) {
+          op.opcode := SlowAluOpcode.CLZ
+        }
+        is(E.CTZ) {
+          op.opcode := SlowAluOpcode.CTZ
+        }
+        default {
+          op.assignDontCare()
+        }
+      }
+      Some(op.asInstanceOf[T])
     } else {
       None
     }
@@ -205,7 +221,8 @@ case class RiscvDecoder(
     lsuPort: Data,
     mulPort: Data,
     divPort: Data,
-    csrPort: Data
+    csrPort: Data,
+    slowAluPort: Data
 ) extends Area {
   val E = RvEncoding
   // TODO: RVC
@@ -302,6 +319,12 @@ case class RiscvDecoder(
       out.rs1Valid := True
       out.fuTag := aluPort
       out.immType := ImmType.I
+    }
+    is(E.CLZ, E.CTZ) {
+      out.rdValid := True
+      out.rs1Valid := True
+      out.fuTag := slowAluPort
+      out.immType := ImmType.X
     }
     is(E.LUI, E.AUIPC) {
       out.rdValid := True
