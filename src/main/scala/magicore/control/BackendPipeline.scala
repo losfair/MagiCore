@@ -93,7 +93,7 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
     unit.io_output.setCompositeName(
       this,
       "ooo_function_unit_output_" + i
-    ) >> dispatch.io.commit(i)
+    ) >> dispatch.io.commitOoO(j)
     oooIssue.io.issueAvailable(j) := unit.io_available
   }
 
@@ -113,7 +113,7 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
       unit.io_output.setCompositeName(
         this,
         "ino_function_unit_output_" + i
-      ) >> dispatch.io.commit(i)
+      ) >> dispatch.io.commitInO(j)
     }
 
   val io = new Bundle {

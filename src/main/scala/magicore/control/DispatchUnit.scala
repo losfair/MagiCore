@@ -7,6 +7,7 @@ import MagiCoreExt._
 import scala.reflect._
 import magicore.lib.funit.AluBranchContext
 import magicore.frontend.FetchPacket
+import scala.collection.mutable.ArrayBuffer
 
 case class DispatchInfo(hardType: HardType[_ <: PolymorphicDataChain])
     extends Bundle
@@ -34,14 +35,19 @@ case class CommitToken() extends Bundle with PolymorphicDataChain {
   val parentObjects = Seq()
 }
 
-case class CommitRequest(hardType: HardType[_ <: PolymorphicDataChain], genRegWriteValue: Boolean = true)
-    extends Bundle
+case class CommitRequest(
+    hardType: HardType[_ <: PolymorphicDataChain],
+    genRegWriteValue: Boolean = true
+) extends Bundle
     with PolymorphicDataChain {
   private val spec = Machine.get[MachineSpec]
   val token = CommitToken()
-  val regWriteValue = if(genRegWriteValue) Vec(
-    (0 until spec.maxNumDstRegsPerInsn).map(_ => spec.dataType)
-  ) else null
+  val regWriteValue =
+    if (genRegWriteValue)
+      Vec(
+        (0 until spec.maxNumDstRegsPerInsn).map(_ => spec.dataType)
+      )
+    else null
   val exception = MachineException()
   val ctx: PolymorphicDataChain = if (hardType != null) hardType() else null
   def parentObjects = Seq(ctx, exception)
@@ -49,7 +55,10 @@ case class CommitRequest(hardType: HardType[_ <: PolymorphicDataChain], genRegWr
 
 case class RobEntry(hardType: HardType[_ <: PolymorphicDataChain])
     extends Bundle {
-  val commitRequest = CommitRequest(hardType = hardType, genRegWriteValue = false) setCompositeName (this, "cr")
+  val commitRequest = CommitRequest(
+    hardType = hardType,
+    genRegWriteValue = false
+  ) setCompositeName (this, "cr")
   val completed = Bool()
 }
 
@@ -85,11 +94,21 @@ case class DispatchUnit[T <: PolymorphicDataChain](
     val input = Stream(dataType())
     val oooOutput = Stream(outType)
     val inOrderOutput = Stream(outType)
-    val commit = Vec(Stream(commitRequestType), sem.numFunctionUnits)
-    val writebackMonitor = Vec(Flow(CommitRequest(dataType, genRegWriteValue = false)), spec.commitWidth)
+    val commitOoO =
+      Vec(Stream(commitRequestType), sem.functionUnits.count(x => !x.inOrder))
+    val commitInO =
+      Vec(Stream(commitRequestType), sem.functionUnits.count(x => x.inOrder))
+    val writebackMonitor = Vec(
+      Flow(CommitRequest(dataType, genRegWriteValue = false)),
+      spec.commitWidth
+    )
   }
 
   val epochMgr = Machine.get[EpochManager]
+  val commitGroups = Seq(
+    (io.commitOoO, epochMgr.decReq_ooo),
+    (io.commitInO, epochMgr.decReq_ino)
+  )
 
   val exception = Reg(
     FullMachineException(fullCommitRequestType)
@@ -210,132 +229,190 @@ case class DispatchUnit[T <: PolymorphicDataChain](
     }
 
     val commitLogic = new Area {
+      case class BankWrite() extends Bundle {
+        val address = UInt(log2Up(robBankSize) bits)
+        val data = robEntryType
+        val enable = Bool()
+      }
+      val bankWrites = banks
+        .map { b =>
+          val w = BankWrite()
+          w.assignDontCare()
+          w.enable := False
+          w
+        }
+        .to[ArrayBuffer]
       // Arbitrated commit
-      val commit = {
-        val c = StreamArbiterFactory.roundRobin.on(io.commit)
+      for (
+        ((commitGroup, decReq), commitGroupIndex) <- commitGroups.zipWithIndex
+      ) {
+        val commit = {
+          // `StreamArbiter` breaks if `valid` goes down without `ready`
+          val c =
+            StreamArbiterFactory.roundRobin.on(commitGroup.map(x => x.check()))
 
-        // Decrement epoch counter for both up-to-date and outdated commits
-        when(c.fire) {
-          Machine.report(
-            Seq(
-              "epoch count dec: epoch ",
-              c.payload.token.epoch,
-              " prev ",
-              epochMgr.epochTable(c.payload.token.epoch)
+          // Decrement epoch counter for both up-to-date and outdated commits
+          when(c.fire) {
+            Machine.report(
+              Seq(
+                "epoch count dec: epoch ",
+                c.payload.token.epoch,
+                " prev ",
+                epochMgr.epochTable(c.payload.token.epoch),
+                " commitGroup " + commitGroupIndex
+              )
+            )
+            decReq.valid := True
+            decReq.payload := c.payload.token.epoch
+          }
+
+          c.throwWhen(c.payload.token.epoch =/= epochMgr.currentEpoch)
+        }
+        commit.setCompositeName(
+          this,
+          postfix = "commitGroup_" + commitGroupIndex + "arbitratedCommit"
+        )
+
+        val assignedBankIndex = getBankIndexForPtr(
+          commit.payload.token.robIndex
+        ).setCompositeName(
+          this,
+          postfix = "commitGroup_" + commitGroupIndex + "assignedBankIndex"
+        )
+        val assignedEntryIndex = getEntryIndexForPtr(
+          commit.payload.token.robIndex
+        ).setCompositeName(
+          this,
+          postfix = "commitGroup_" + commitGroupIndex + "assignedEntryIndex"
+        )
+
+        val selectedEntry = robEntryType
+        val selectedEntryValid = False
+        commit.ready := selectedEntryValid
+
+        selectedEntry.assignDontCare()
+
+        if (commitGroupIndex == 0) {
+          println("ROB entry width: " + selectedEntry.getBitsWidth)
+          println("CommitReq width: " + commit.payload.getBitsWidth)
+        }
+
+        for ((b, i) <- banks.zipWithIndex) {
+          val oldEntry = b.readAsync(address = assignedEntryIndex)
+          val newEntry = robEntryType
+          newEntry.completed := True
+          newEntry.commitRequest.ctx := oldEntry.commitRequest.ctx
+          newEntry.commitRequest.exception := commit.payload.exception
+          newEntry.commitRequest.token := commit.payload.token
+
+          val requestWrite = assignedBankIndex === i && commit.valid
+          requestWrite.setCompositeName(
+            this,
+            postfix =
+              "commitGroup_" + commitGroupIndex + "_bank_" + i + "_requestWrite"
+          )
+          val prevWrite = bankWrites(i)
+          val newWrite = BankWrite()
+          newWrite.address := assignedEntryIndex
+          newWrite.data := newEntry
+          newWrite.enable := requestWrite
+          bankWrites.update(
+            i,
+            prevWrite.enable.mux(
+              False -> newWrite,
+              True -> prevWrite
             )
           )
-          epochMgr.decReq.valid := True
-          epochMgr.decReq.payload := c.payload.token.epoch
-        }
-
-        c.throwWhen(c.payload.token.epoch =/= epochMgr.currentEpoch)
-      }
-
-      val assignedBankIndex = getBankIndexForPtr(
-        commit.payload.token.robIndex
-      )
-      val assignedEntryIndex = getEntryIndexForPtr(
-        commit.payload.token.robIndex
-      )
-
-      commit.freeRun()
-
-      val selectedEntry = robEntryType
-      val selectedEntryValid = False
-
-      selectedEntry.assignDontCare()
-      println("ROB entry width: " + selectedEntry.getBitsWidth)
-      println("CommitReq width: " + commit.payload.getBitsWidth)
-
-      for ((b, i) <- banks.zipWithIndex) {
-        val oldEntry = b.readAsync(address = assignedEntryIndex)
-        val newEntry = robEntryType
-        newEntry.completed := True
-        newEntry.commitRequest.ctx := oldEntry.commitRequest.ctx
-        newEntry.commitRequest.exception := commit.payload.exception
-        newEntry.commitRequest.token := commit.payload.token
-
-        val fireNow = assignedBankIndex === i && commit.valid
-        b.write(
-          address = assignedEntryIndex,
-          data = newEntry,
-          enable = fireNow
-        )
-
-        when(fireNow) {
-          assert(!oldEntry.completed, "Commit request for completed ROB entry")
-          selectedEntry := oldEntry
-          selectedEntryValid := True
-        }
-      }
-
-      val renameInfo = selectedEntry.commitRequest.lookup[RenameInfo]
-      val decodeInfo = selectedEntry.commitRequest.lookup[DecodeInfo]
-
-      // Write to physical regfile
-      for (
-        ((dstRegPhys, dstRegArch), valueToWrite) <- renameInfo.physDstRegs
-          .zip(
-            decodeInfo.archDstRegs
+          val fireNow = !prevWrite.enable && requestWrite
+          fireNow.setCompositeName(
+            this,
+            postfix =
+              "commitGroup_" + commitGroupIndex + "_bank_" + i + "_fireNow"
           )
-          .zip(commit.regWriteValue)
-      ) {
-        val prfItem = PrfItem()
-        prfItem.data := valueToWrite
 
-        val shouldWrite = dstRegArch.valid && selectedEntryValid
-        prfIf.write(
-          address = dstRegPhys,
-          data = prfItem,
-          enable = shouldWrite
-        )
-
-        new ResetArea(reset = reset, cumulative = true) {
-          prfIf.notify_callerHandlesReset(
-            enable = shouldWrite,
-            index = dstRegPhys
-          )
+          when(fireNow) {
+            assert(
+              !oldEntry.completed,
+              "Commit request for completed ROB entry"
+            )
+            selectedEntry := oldEntry
+            selectedEntryValid := True
+          }
         }
 
-        when(shouldWrite) {
-          val st = prfIf.state.table(dstRegPhys)
-          assert(st.busy, "Physical register not busy")
-          assert(!st.dataAvailable, "Physical register already has data")
+        val renameInfo = selectedEntry.commitRequest.lookup[RenameInfo]
+        val decodeInfo = selectedEntry.commitRequest.lookup[DecodeInfo]
 
-          st.busy := False
-          st.dataAvailable := True
-        }
-      }
-
-      when(selectedEntryValid) {
-        Machine.report(
-          Seq(
-            "commit rob entry cyc=",
-            debugCyc,
-            " at ",
-            commit.payload.token.robIndex,
-            " epoch ",
-            commit.payload.token.epoch
-          ) ++ renameInfo.physDstRegs
+        // Write to physical regfile
+        for (
+          ((dstRegPhys, dstRegArch), valueToWrite) <- renameInfo.physDstRegs
             .zip(
               decodeInfo.archDstRegs
             )
-            .zip(commit.payload.regWriteValue)
-            .flatMap(arg => {
-              val ((phys, arch), value) = arg
-              Seq(
-                "[v=",
-                arch.valid,
-                ",phys=",
-                phys,
-                ",arch=",
-                arch.index,
-                ",value=",
-                value,
-                "]"
+            .zip(commit.regWriteValue)
+        ) {
+          val prfItem = PrfItem()
+          prfItem.data := valueToWrite
+
+          val shouldWrite = dstRegArch.valid && selectedEntryValid
+          prfIf.write(
+            address = dstRegPhys,
+            data = prfItem,
+            enable = shouldWrite
+          )
+
+          new ResetArea(reset = reset, cumulative = true) {
+            prfIf.notify_callerHandlesReset(
+              enable = shouldWrite,
+              index = dstRegPhys
+            )
+          }
+
+          when(shouldWrite) {
+            val st = prfIf.state.table(dstRegPhys)
+            assert(st.busy, "Physical register not busy")
+            assert(!st.dataAvailable, "Physical register already has data")
+
+            st.busy := False
+            st.dataAvailable := True
+          }
+        }
+
+        when(selectedEntryValid) {
+          Machine.report(
+            Seq(
+              "commit rob entry cyc=",
+              debugCyc,
+              " at ",
+              commit.payload.token.robIndex,
+              " epoch ",
+              commit.payload.token.epoch,
+              " group " + commitGroupIndex
+            ) ++ renameInfo.physDstRegs
+              .zip(
+                decodeInfo.archDstRegs
               )
-            })
-        )
+              .zip(commit.payload.regWriteValue)
+              .flatMap(arg => {
+                val ((phys, arch), value) = arg
+                Seq(
+                  "[v=",
+                  arch.valid,
+                  ",phys=",
+                  phys,
+                  ",arch=",
+                  arch.index,
+                  ",value=",
+                  value,
+                  "]"
+                )
+              })
+          )
+        }
+      }
+
+      for ((w, b) <- bankWrites.zip(banks)) {
+        b.write(address = w.address, data = w.data, enable = w.enable)
       }
     }
 
@@ -471,7 +548,9 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           x._2.io_effect(i).payload := eff
         })
 
-        val physValue_debug = Machine.debugGen { renameInfo.physDstRegs.map(phys => prfIf.readAsync(phys)) }
+        val physValue_debug = Machine.debugGen {
+          renameInfo.physDstRegs.map(phys => prfIf.readAsync(phys))
+        }
 
         // Pop the item from the queue
         when(entryReady) {

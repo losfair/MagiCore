@@ -47,10 +47,11 @@ class DummyEffect(staticTagData: => Data, inOrder_sideEffect_enable: Boolean)
       out.regWriteValue(0) := (issue.srcRegData(0).asUInt + 42).asBits
 
       if(inOrder_sideEffect) {
-        io_output << io_input
+        // `io_input` may be discarded but `io_output` must not
+        io_output <-< io_input
           .translateWith(out)
         effectOutput.setIdle()
-        when(io_output.fire) {
+        when(io_input.fire) {
           effectOutput.valid := True
           effectOutput.payload := op.value
         }
@@ -64,7 +65,7 @@ class DummyEffect(staticTagData: => Data, inOrder_sideEffect_enable: Boolean)
           pendingValid_scheduled.zip(pendingValid_posted).map(x => x._1 || x._2)
         )
 
-        io_output << io_input
+        io_output <-< io_input
           .translateWith(out)
           .continueWhen(!pendingValid(dispatch.robIndex))
         pending.write(
