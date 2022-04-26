@@ -79,8 +79,63 @@ case class MiniRv32() extends Component {
   )
   axiCrossbar.addConnections(
     processor.io.iBus -> Seq(bootrom.io.axi, ocram.io.axi, io.bus),
-    processor.io.dBus -> Seq(bootrom.io.axi, ocram.io.axi, io.bus, uart.io.axi, clint.io.bus)
+    processor.io.dBus -> Seq(
+      bootrom.io.axi,
+      ocram.io.axi,
+      io.bus,
+      uart.io.axi,
+      clint.io.bus
+    )
   )
+
+  // Simulate memory latency
+  /*
+  axiCrossbar.addPipelining(ocram.io.axi)((crossbar, device) => {
+    crossbar.arw
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true) >> device.arw
+    crossbar.w
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true) >> device.w
+    device.r >> crossbar.r
+    device.b >> crossbar.b
+  })
+  axiCrossbar.addPipelining(io.bus)((crossbar, device) => {
+    crossbar.ar
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true) >> device.ar
+    device.r >> crossbar.r
+  })((crossbar, device) => {
+    crossbar.aw
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true) >> device.aw
+    crossbar.w
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true)
+      .pipelined(m2s = true, s2m = true) >> device.w
+    device.b >> crossbar.b
+  })
+   */
+
   axiCrossbar.build()
 }
 
