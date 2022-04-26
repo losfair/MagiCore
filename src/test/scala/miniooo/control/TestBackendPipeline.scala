@@ -150,10 +150,9 @@ class TestBackendPipeline extends AnyFunSuite {
       } else if (ctag == classTag[EarlyException]) {
         val op = EarlyException()
         op.code := opc.mux(
-          GenericOpcode.SERIALIZE -> EarlyExceptionCode.SERIALIZE.craft(),
-          default -> EarlyExceptionCode.DECODE_ERROR.craft()
+          GenericOpcode.SERIALIZE -> MachineExceptionCode.SERIALIZE.craft(),
+          default -> MachineExceptionCode.DECODE_ERROR.craft()
         )
-        op.interruptCause.assignDontCare()
         Some(op.asInstanceOf[T])
       } else {
         None

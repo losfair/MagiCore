@@ -47,6 +47,9 @@ case class RiscvProcessor(
 
   if (debug) Machine.provide(MachineDebugMarker)
 
+  val intrSvc = RvInterruptService()
+  Machine.provide(intrSvc)
+
   val csr = RvCsrFileReg()
   csr.provide()
 
@@ -77,8 +80,6 @@ case class RiscvProcessor(
   )
   fetch.io.output >> decode.io.input
 
-  decode.io.intrInjection.setIdle()
-
   Machine.get[MachineException].resetArea {
     decode.io.output >/-> pipeline.io.input
   }
@@ -94,7 +95,10 @@ case class RiscvProcessor(
     )
     val iBus = master(Axi4ReadOnly(fetch.io.memBus.config))
     val dBus = master(Axi4(lsu.io_axiMaster.config))
+    val interrupt = in(RvInterruptLines())
   }
+
+  intrSvc.setLines(io.interrupt)
 
   pipeline.io.writebackMonitor
     .zip(io.writebackMonitor)

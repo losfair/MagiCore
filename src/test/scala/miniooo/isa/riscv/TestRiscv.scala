@@ -27,6 +27,9 @@ class TestRiscv extends AnyFunSuite {
     val processor = new ResetArea(reset = processorReset, cumulative = true) {
       val v = RiscvProcessor(resetPc = 0x0, debug = debug)
     }.v
+    processor.io.interrupt.external := False
+    processor.io.interrupt.timer := False
+    processor.io.interrupt.software := False
 
     val ocram = new Axi4SharedOnChipRam(
       dataWidth = 32,

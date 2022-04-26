@@ -32,7 +32,9 @@ module Top(
   input dBus_rlast,
 
   output uart_txd,
-  input uart_rxd
+  input uart_rxd,
+
+  input core_interrupt
 );
 
 MiniRv32 soc_1(
@@ -78,7 +80,8 @@ MiniRv32 soc_1(
   .io_bus_r_payload_resp(dBus_rresp),
   .io_bus_r_payload_last(dBus_rlast),
   .io_uart_txd(uart_txd),
-  .io_uart_rxd(uart_rxd)
+  .io_uart_rxd(uart_rxd),
+  .io_interrupt(core_interrupt)
 );
 
 endmodule

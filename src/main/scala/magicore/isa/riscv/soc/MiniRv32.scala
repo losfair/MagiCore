@@ -48,6 +48,8 @@ case class MiniRv32() extends Component {
     )
   )
 
+  val clint = new Axi4Clint(hartCount = 1, idWidth = slaveIdWidth)
+
   val io = new Bundle {
     val bus = master(
       Axi4(
@@ -58,21 +60,26 @@ case class MiniRv32() extends Component {
         )
       )
     )
+    val interrupt = in(Bool())
     val uart = master(Uart())
   }
 
   io.uart <> uart.io.uart
+  processor.io.interrupt.external := io.interrupt
+  processor.io.interrupt.timer := clint.io.timerInterrupt(0)
+  processor.io.interrupt.software := clint.io.softwareInterrupt(0)
 
   var axiCrossbar = Axi4CrossbarFactory()
   axiCrossbar.addSlaves(
     bootrom.io.axi -> SizeMapping(0x00010000, 16384), // TODO: Error on writes
     ocram.io.axi -> SizeMapping(0x00020000, 65536),
     io.bus -> SizeMapping(0x40000000, 2 GiB),
-    uart.io.axi -> SizeMapping(BigInt("ff010000", 16), 0x1000)
+    uart.io.axi -> SizeMapping(BigInt("ff010000", 16), 0x100),
+    clint.io.bus -> SizeMapping(BigInt("ff020000", 16), 0x10000)
   )
   axiCrossbar.addConnections(
     processor.io.iBus -> Seq(bootrom.io.axi, ocram.io.axi, io.bus),
-    processor.io.dBus -> Seq(bootrom.io.axi, ocram.io.axi, io.bus, uart.io.axi)
+    processor.io.dBus -> Seq(bootrom.io.axi, ocram.io.axi, io.bus, uart.io.axi, clint.io.bus)
   )
   axiCrossbar.build()
 }

@@ -15,7 +15,6 @@ import javax.swing.plaf.multi.MultiOptionPaneUI
 import magicore.lib.funit.DividerOperation
 import magicore.lib.funit.LsuOperationSize
 import magicore.lib.funit.EarlyException
-import magicore.lib.funit.EarlyExceptionCode
 import magicore.lib.funit.MultiplierOperation
 
 object ImmType extends SpinalEnum(binarySequential) {
@@ -213,11 +212,12 @@ case class RiscvDecoder(
   private val fspec = Machine.get[FrontendSpec]
   assert(fspec.insnWidth.value == 32)
 
+  private val intrSvc = Machine.get[RvInterruptService]
+
   val io = new Bundle {
     val input = Stream(FetchPacket())
     val output = Stream(DecodePacket())
     val branchInfoFeedback = BranchInfoFeedback()
-    val intrInjection = Flow(DecodeIntrInjectionInfo())
   }
 
   val exc = Machine.get[MachineException]
@@ -241,13 +241,12 @@ case class RiscvDecoder(
 
   when(out.fetch.cacheMiss) {
     outPatched.fuTag := earlyExceptionPort
-    outPatched.earlyExc.code := EarlyExceptionCode.CACHE_MISS
+    outPatched.earlyExc.code := MachineExceptionCode.INSN_CACHE_MISS
   }
 
-  when(io.intrInjection.valid) {
+  when(intrSvc.trigger) {
     outPatched.fuTag := earlyExceptionPort
-    outPatched.earlyExc.code := EarlyExceptionCode.EXT_INTERRUPT
-    outPatched.earlyExc.interruptCause := io.intrInjection.payload.cause
+    outPatched.earlyExc.code := MachineExceptionCode.EXT_INTERRUPT
   }
 
   io.output << io.input.translateWith(outPatched)
@@ -256,6 +255,8 @@ case class RiscvDecoder(
 
   val brFeedback_offset = UInt(32 bits) assignDontCare ()
   io.branchInfoFeedback.target := io.input.payload.pc + brFeedback_offset
+
+  val csr = Machine.get[RvCsrFileReg]
 
   switch(insn) {
     is(
@@ -351,22 +352,27 @@ case class RiscvDecoder(
     is(E.FENCEI) {
       out.fuTag := earlyExceptionPort
       out.immType := ImmType.X
-      out.earlyExc.code := EarlyExceptionCode.INSN_CACHE_FLUSH
+      out.earlyExc.code := MachineExceptionCode.INSN_CACHE_FLUSH
     }
     is(E.MRET) {
       out.fuTag := earlyExceptionPort
       out.immType := ImmType.X
-      out.earlyExc.code := EarlyExceptionCode.EXCEPTION_RETURN
+
+      when(csr.csrFile.priv === RvPrivLevel.M) {
+        out.earlyExc.code := MachineExceptionCode.EXCEPTION_RETURN
+      } otherwise {
+        out.earlyExc.code := MachineExceptionCode.DECODE_ERROR
+      }
     }
     is(E.ECALL) {
       out.fuTag := earlyExceptionPort
       out.immType := ImmType.X
-      out.earlyExc.code := EarlyExceptionCode.ENV_CALL
+      out.earlyExc.code := MachineExceptionCode.ENV_CALL
     }
     default {
       out.fuTag := earlyExceptionPort
       out.immType := ImmType.X
-      out.earlyExc.code := EarlyExceptionCode.DECODE_ERROR
+      out.earlyExc.code := MachineExceptionCode.DECODE_ERROR
     }
   }
 

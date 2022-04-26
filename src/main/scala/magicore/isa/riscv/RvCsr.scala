@@ -25,13 +25,14 @@ object RvCsrFile {
     x.mtvec := 0
     x.mstatus.mie := False
     x.mstatus.mpie := False
-    x.mstatus.mpp := 0
+    x.mstatus.mpp := RvPrivLevel.M
     x
   }
 }
 
-object RvPrivLevel extends SpinalEnum(binarySequential) {
+object RvPrivLevel extends SpinalEnum {
   val U, M = newElement()
+  defaultEncoding = SpinalEnumEncoding("staticEncoding")(U -> 0, M -> 3)
 }
 
 case class RvCsrFile() extends Bundle {
@@ -50,14 +51,22 @@ case class RvCsrFile() extends Bundle {
 }
 
 case class RvMstatus() extends Bundle {
-  val mie = Bool()
+  private val intrSvc = Machine.get[RvInterruptService]
+  def mie = intrSvc.mie
   val mpie = Bool()
-  val mpp = Bits(2 bits)
+  val mpp = RvPrivLevel()
 
   def decodeFromBits_lower(bits: Bits): RvMstatus = {
     mie := bits(3)
     mpie := bits(7)
-    mpp := bits(12 downto 11)
+    switch(bits(12 downto 11)) {
+      is(B"00") {
+        mpp := RvPrivLevel.U
+      }
+      is(B"11") {
+        mpp := RvPrivLevel.M
+      }
+    }
     this
   }
 
@@ -66,7 +75,7 @@ case class RvMstatus() extends Bundle {
     out := 0
     out(3) := mie
     out(7) := mpie
-    out(12 downto 11) := mpp
+    out(12 downto 11) := mpp.asBits
     out
   }
 }
@@ -103,12 +112,17 @@ case class RvCsrFileIntent(data: Stream[_ <: PolymorphicDataChain])
 
   val ok = False
 
+  val rvCsr = Machine.get[RvCsrFileReg]
+
   def on(
       csr: Seq[Bits],
       value: Bits,
-      write: (Bits) => Unit = null
+      write: (Bits) => Unit = null,
+      priv: Seq[SpinalEnumElement[RvPrivLevel.type]] = Seq(RvPrivLevel.M)
   ): Unit = {
-    when(csr.map(x => fetch.insn(31 downto 20) === x.resized).orR) {
+    val accessOk = priv.map(x => rvCsr.csrFile.priv === x).orR
+
+    when(accessOk && csr.map(x => fetch.insn(31 downto 20) === x.resized).orR) {
       switch(op) {
         is(B"01") {
           // CSRRW
@@ -149,6 +163,8 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
   ): FunctionUnitInstance = {
     new FunctionUnitInstance {
       private val fspec = Machine.get[FrontendSpec]
+      private val intrSvc = Machine.get[RvInterruptService]
+
       val io_available = null
       val io_input = Stream(hardType())
       val io_output = Stream(CommitRequest(null))
@@ -254,6 +270,54 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
         x => csr.csrFile.mtval := x.asUInt
       )
 
+      // misa
+      val misa = Bits(32 bits)
+      misa := 0
+      misa(20) := True // U
+      misa(12) := True // M
+      misa(8) := True // I
+      intent.on(
+        Seq(0x301),
+        misa
+      )
+
+      // mvendorid
+      intent.on(
+        Seq(0xf11),
+        0
+      )
+
+      // marchid
+      intent.on(
+        Seq(0xf12),
+        0
+      )
+
+      // mimpid
+      intent.on(
+        Seq(0xf13),
+        0
+      )
+
+      // mhartid
+      intent.on(
+        Seq(0xf14),
+        0
+      )
+
+      // mip
+      intent.on(
+        Seq(0x344),
+        intrSvc.csrMip.encoding
+      )
+
+      // mie
+      intent.on(
+        Seq(0x304),
+        intrSvc.csrMie.encoding,
+        intrSvc.csrMie.decodeAndSet
+      )
+
       // Exception handling
       val exceptionLogic = new Area {
         val restartIt_reg = Reg(Bool()) init (false)
@@ -280,7 +344,17 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
           )).asUInt
           csr.csrFile.mepc := fetch.pc
           csr.csrFile.mtval := mtval
+          // 3.1.6.1
+          // When a trap is taken from privilege mode y into privilege mode x,
+          // x PIE is set to the value of x IE; x IE is set to 0; and x PP is set to y.
+          csr.csrFile.mstatus.mpp := csr.csrFile.priv
+          csr.csrFile.mstatus.mpie := csr.csrFile.mstatus.mie
+          csr.csrFile.mstatus.mie := False
+          csr.csrFile.priv := RvPrivLevel.M
         }
+
+        val wfiPending = Reg(Bool()) init (false)
+        val wfiPC = Reg(fspec.addrType())
 
         when(exc.valid) {
           switch(exc.code) {
@@ -295,12 +369,27 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
             is(MachineExceptionCode.EXT_INTERRUPT) {
               // External interrupt.
               // TODO: Vectored interrupt
-              restartIntoException(exc.extInterrupt_cause.asUInt, 0, true)
+              when(intrSvc.trigger) {
+                restartIntoException(intrSvc.cause, 0, true)
+              } otherwise {
+                // spurious
+                restartIt_reg := True
+                restartPC_reg := fetch.pc
+              }
             }
             is(MachineExceptionCode.EXCEPTION_RETURN) {
               // MRET
+              // 8.6.4 Trap Return
               restartIt_reg := True
               restartPC_reg := csr.csrFile.mepc
+              csr.csrFile.priv := csr.csrFile.mstatus.mpp
+
+              // MRET then in mstatus/mstatush sets MPV=0, MPP=0,
+              // MIE=MPIE, and MPIE=1. Lastly, MRET sets the privilege mode as previously determined, and
+              // sets pc=mepc.
+              csr.csrFile.mstatus.mpp := RvPrivLevel.U
+              csr.csrFile.mstatus.mie := csr.csrFile.mstatus.mpie
+              csr.csrFile.mstatus.mpie := True
             }
             is(MachineExceptionCode.ENV_CALL) {
               // ecall
@@ -312,8 +401,18 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
                 0
               )
             }
+            is(MachineExceptionCode.WFI) {
+              wfiPending := True
+              wfiPC := fetch.pc
+            }
             default {}
           }
+        }
+
+        when(wfiPending && intrSvc.active) {
+          wfiPending := False
+          restartIt_reg := True
+          restartPC_reg := wfiPC + 4
         }
 
         Machine.provide(
