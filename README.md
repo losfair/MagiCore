@@ -1,5 +1,7 @@
 # MagiCore
 
-ISA-independent SpinalHDL framework for building single-issue out-of-order processors.
+ISA-independent SpinalHDL framework for building out-of-order processors.
 
-WIP.
+This is a work-in-progress.
+
+![Architecture](res/arch.svg)
