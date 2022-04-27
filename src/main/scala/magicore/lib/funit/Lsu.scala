@@ -271,7 +271,6 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
       val pendingStoresUtil = new Area {
         val srcRobIndexAtFirstReplace =
           storeBuffer(storeBufferAllocLogic.firstReplace._2).srcRobIndex
-        val storeAtFirstReplace = pendingStores(srcRobIndexAtFirstReplace)
       }
 
       // This logic block may invalidate a `storeBuffer` entry. So, this logic needs to be
@@ -283,41 +282,20 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
             axiM.b.payload.id.resize(spec.robEntryIndexWidth)
           assert(pendingStoreValid_posted(robIndex), "invalid store ack")
           pendingStoreValid_posted(robIndex) := False
-
-          val storeBufferIndex =
-            storeBuffer.zipWithIndex.firstWhere(
-              hardType = storeBufferAllocLogic.indexType(),
-              predicate = x => x._1.valid && x._1.srcRobIndex === robIndex,
-              generate =
-                x => U(x._2, storeBufferAllocLogic.indexType().getWidth bits)
+          val ok = False
+          for (entry <- storeBuffer) {
+            when(entry.srcRobIndex === robIndex) {
+              entry.valid := False
+              ok := True
+            }
+          }
+          when(ok) {
+            Machine.report(
+              Seq(
+                "store effect ack: robIndex=",
+                robIndex
+              )
             )
-
-          Machine.report(
-            Seq(
-              "store effect ack: robIndex=",
-              robIndex,
-              " evictBuffer=",
-              storeBufferIndex._1,
-              " storeBufferIndex=",
-              storeBufferIndex._2
-            )
-          )
-
-          // The store buffer entry may have been overwritten by a newer store - so check here
-          when(storeBufferIndex._1) {
-            assert(
-              storeBuffer(storeBufferIndex._2).valid,
-              "invalid store buffer index in effect stage"
-            )
-            assert(
-              storeBuffer(storeBufferIndex._2).key === getStoreBufferKeyForAddr(
-                pendingStores(
-                  robIndex
-                ).addr
-              ),
-              "store address mismatch"
-            )
-            storeBuffer(storeBufferIndex._2).valid := False
           }
         }
       }
@@ -385,11 +363,8 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
             commitReq.regWriteValue.assignDontCare()
             commitReq.token := req.payload.token
 
-            val byteRangeConflict =
-              storeBufferAllocLogic.firstReplace._1 && pendingStoresUtil.storeAtFirstReplace.strb =/= req.payload.strb
-
             val ok =
-              previousStoreCompleted && storeBufferAllocLogic.allocOk && !byteRangeConflict
+              previousStoreCompleted && storeBufferAllocLogic.allocOk
             outStream_pipeline.valid := ok
             outStream_pipeline.payload := commitReq
             req.ready := ok && outStream_pipeline.ready
@@ -468,49 +443,11 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               ),
               "load operation got invalid src rob index"
             )
-            val store = pendingStoresUtil.storeAtFirstReplace
-            val ok = found && store.strb === req.payload.strb
 
-            val commitReq = CommitRequest(null)
-            commitReq.exception := MachineException.idle
-
-            val storeData = convertLoadOutputToRegValue(
-              store.data,
-              req.payload.strb,
-              req.payload
-                .addr(byteOffsetWidth.value - 1 downto 0)
-                .asUInt,
-              req.payload.size,
-              req.payload.signExt
-            )
-            commitReq.regWriteValue(0) := storeData
-            commitReq.token := req.payload.token
-
-            outStream_pipeline.valid := ok
-            outStream_pipeline.payload := commitReq
+            outStream_pipeline.setIdle()
 
             when(found) {
-              when(ok) {
-                // Store buffer bypass ok
-                req.ready := outStream_pipeline.ready
-                when(req.ready) {
-                  Machine.report(
-                    Seq(
-                      "load bypass ok - addr=",
-                      req.payload.addr.asUInt,
-                      " data=",
-                      storeData,
-                      " robIndex=",
-                      req.payload.token.robIndex,
-                      " epoch=",
-                      req.payload.token.epoch
-                    )
-                  )
-                }
-              } otherwise {
-                // strb mismatch - wait
-                req.ready := False
-              }
+              req.ready := False
             } otherwise {
               // OoO memory read issue
               val ar = Axi4Ar(axiConfig)
