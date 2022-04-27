@@ -32,6 +32,8 @@ trait LsuInstance extends FunctionUnitInstance {
   def io_axiMaster: Axi4
 }
 
+case class LsuBusySignal(busy: Bool)
+
 class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
   def staticTag: Data = staticTagData
   private val spec = Machine.get[MachineSpec]
@@ -214,6 +216,9 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
           )
       )
 
+      val busy = LsuBusySignal(pendingStoreValid.orR)
+      Machine.provide(busy)
+
       // Validate pendingStoreValid invariants
       for (
         ((posted, scheduled), i) <- pendingStoreValid_posted
@@ -347,7 +352,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
             commitReq.regWriteValue.assignDontCare()
             commitReq.token := req.payload.token
 
-            val ok = !pendingStoreValid.orR
+            val ok = !busy.busy
             req.ready := ok && outStream_pipeline.ready
             outStream_pipeline.valid := ok
             outStream_pipeline.payload := commitReq

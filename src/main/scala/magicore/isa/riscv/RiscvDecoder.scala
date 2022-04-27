@@ -239,6 +239,12 @@ case class RiscvDecoder(
 
   val exc = Machine.get[MachineException]
 
+  val wantStall = False
+
+  val stalled = Reg(
+    Bool()
+  ) init (false) setWhen (io.input.fire && wantStall) clearWhen (exc.valid)
+
   val insn = io.input.payload.insn
   val imm = E.IMM(insn)
   val opc = insn(6 downto 0)
@@ -266,7 +272,17 @@ case class RiscvDecoder(
     outPatched.earlyExc.code := MachineExceptionCode.EXT_INTERRUPT
   }
 
-  io.output << io.input.translateWith(outPatched)
+  val discardOutput = False
+  io.output << io.input
+    .translateWith(outPatched)
+    .continueWhen(!stalled)
+    .throwWhen(discardOutput)
+
+  def discardIt() {
+    discardOutput := True
+    out.fuTag.assignDontCare()
+    out.immType.assignDontCare()
+  }
 
   io.branchInfoFeedback := BranchInfoFeedback.idle
 
@@ -358,8 +374,21 @@ case class RiscvDecoder(
       out.immType := ImmType.X
     }
     is(E.FENCE) {
-      out.fuTag := lsuPort
-      out.immType := ImmType.X
+      val p_iorw = insn(27 downto 24)
+      val s_iorw = insn(23 downto 20)
+      when(p_iorw === B"0001" && s_iorw === B"0001") {
+        // fence w, w
+        discardIt()
+      } elsewhen (p_iorw === B"0001" && (s_iorw === B"0011" || s_iorw === B"0010")) {
+        // fence w, rw | fence w, r
+        out.fuTag := lsuPort
+        out.immType := ImmType.X
+      } otherwise {
+        out.fuTag := earlyExceptionPort
+        out.immType := ImmType.X
+        out.earlyExc.code := MachineExceptionCode.SERIALIZE
+        wantStall := True
+      }
     }
     is(E.CSRRW, E.CSRRS, E.CSRRC) {
       out.rdValid := True
@@ -376,6 +405,7 @@ case class RiscvDecoder(
       out.fuTag := earlyExceptionPort
       out.immType := ImmType.X
       out.earlyExc.code := MachineExceptionCode.INSN_CACHE_FLUSH
+      wantStall := True
     }
     is(E.MRET) {
       out.fuTag := earlyExceptionPort
@@ -386,21 +416,26 @@ case class RiscvDecoder(
       } otherwise {
         out.earlyExc.code := MachineExceptionCode.DECODE_ERROR
       }
+
+      wantStall := True
     }
     is(E.ECALL) {
       out.fuTag := earlyExceptionPort
       out.immType := ImmType.X
       out.earlyExc.code := MachineExceptionCode.ENV_CALL
+      wantStall := True
     }
     is(E.WFI) {
       out.fuTag := earlyExceptionPort
       out.immType := ImmType.X
       out.earlyExc.code := MachineExceptionCode.WFI
+      wantStall := True
     }
     default {
       out.fuTag := earlyExceptionPort
       out.immType := ImmType.X
       out.earlyExc.code := MachineExceptionCode.DECODE_ERROR
+      wantStall := True
     }
   }
 

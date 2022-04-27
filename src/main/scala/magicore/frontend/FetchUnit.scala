@@ -455,11 +455,6 @@ case class FetchUnit() extends Area {
           ).resized
           lowLatencyPredictor.btbWriteData := btbEntry
         }
-      } elsewhen (exc.exc.code === MachineExceptionCode.SERIALIZE) {
-        Machine.report(
-          Seq("Got serialization exception. Restarting at next pc.")
-        )
-        pcStreamGen.pc.pc := nextPCforTheirFetchPacket
       } elsewhen (exc.exc.code === MachineExceptionCode.INSN_CACHE_FLUSH) {
         Machine.report(Seq("Requested ICache flush."))
         pcStreamGen.pc.pc := nextPCforTheirFetchPacket

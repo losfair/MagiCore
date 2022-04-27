@@ -352,7 +352,9 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
         }
 
         val wfiPending = Reg(Bool()) init (false)
-        val wfiPC = Reg(fspec.addrType())
+        val serializePending = Reg(Bool()) init (false)
+        val pendingPC = Reg(fspec.addrType())
+        val pendingPC_next = pendingPC + 4
 
         when(exc.valid) {
           switch(exc.code) {
@@ -401,7 +403,11 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
             }
             is(MachineExceptionCode.WFI) {
               wfiPending := True
-              wfiPC := fetch.pc
+              pendingPC := fetch.pc
+            }
+            is(MachineExceptionCode.SERIALIZE) {
+              serializePending := True
+              pendingPC := fetch.pc
             }
             default {}
           }
@@ -410,7 +416,17 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
         when(wfiPending && intrSvc.active) {
           wfiPending := False
           restartIt_reg := True
-          restartPC_reg := wfiPC + 4
+          restartPC_reg := pendingPC_next
+        }
+
+        val serializeLogic = new Area {
+          // Our own control signal is delayed for at least 1 cycle so delaying `lsuBusy` by one cycle is valid here
+          val lsuBusy = RegNext(Machine.get[LsuBusySignal].busy, True)
+          when(serializePending && !lsuBusy) {
+            serializePending := False
+            restartIt_reg := True
+            restartPC_reg := pendingPC_next
+          }
         }
 
         Machine.provide(
