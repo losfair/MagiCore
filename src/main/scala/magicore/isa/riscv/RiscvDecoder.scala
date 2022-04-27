@@ -379,8 +379,8 @@ case class RiscvDecoder(
       when(p_iorw === B"0001" && s_iorw === B"0001") {
         // fence w, w
         discardIt()
-      } elsewhen (p_iorw === B"0001" && (s_iorw === B"0011" || s_iorw === B"0010")) {
-        // fence w, rw | fence w, r
+      } elsewhen (p_iorw === B"0001") {
+        // fence w, *
         out.fuTag := lsuPort
         out.immType := ImmType.X
       } otherwise {
