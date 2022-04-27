@@ -31,11 +31,14 @@ case class MiniRv32() extends Component {
 
   val bootromBackingStore = Mem(Bits(32 bits), 16384)
   bootromBackingStore.initFromFile("./fsbl/firmware.bin")
-  val bootromAxi = Axi4Rom(mem = bootromBackingStore, config = Axi4Config(
-    addressWidth = 32,
-    dataWidth = 32,
-    idWidth = slaveIdWidth
-  ))
+  val bootromAxi = Axi4Rom(
+    mem = bootromBackingStore,
+    config = Axi4Config(
+      addressWidth = 32,
+      dataWidth = 32,
+      idWidth = slaveIdWidth
+    )
+  )
 
   val ocram = Axi4SharedOnChipRam(
     dataWidth = 32,
@@ -56,8 +59,10 @@ case class MiniRv32() extends Component {
 
   val clint = new Axi4Clint(hartCount = 1, idWidth = slaveIdWidth)
   val intrController =
-    new Axi4InterruptCtrl(width = numExternalInterrupts + numInternalInterrupts, idWidth = slaveIdWidth)
-
+    new Axi4InterruptCtrl(
+      width = numExternalInterrupts + numInternalInterrupts,
+      idWidth = slaveIdWidth
+    )
 
   val mas = new MicroarchSampler(
     sampleWidth = 32 bits,
@@ -74,14 +79,18 @@ case class MiniRv32() extends Component {
     "dispatch.ino.fire",
     processor.pipeline.dispatch.io.inOrderOutput.fire
   )
-  mas.addSignal(
-    "issue.ooo.fire",
-    processor.pipeline.oooIssue.issuePopApplyLogic.unifiedIssuePort.fire
-  )
-  mas.addSignal(
-    "issue.ino.fire",
-    processor.pipeline.inOrderIssue.popStream.fire
-  )
+  for ((port, i) <- processor.pipeline.oooIssue.io.issuePorts.zipWithIndex) {
+    mas.addSignal(
+      s"issue.ooo.port_$i.fire",
+      port.fire
+    )
+  }
+  for ((port, i) <- processor.pipeline.inOrderIssue.io.issuePorts.zipWithIndex) {
+    mas.addSignal(
+      s"issue.ino.port_$i.fire",
+      port.fire
+    )
+  }
   mas.addSignal(
     "commit.ooo.fire",
     processor.pipeline.dispatch.io.commitOoO.map(x => x.fire).orR
