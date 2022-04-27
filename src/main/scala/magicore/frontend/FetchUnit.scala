@@ -110,10 +110,18 @@ case class FetchUnit() extends Area {
   val pcStream = Stream(FetchPacket())
   val speculatedGlobalHistory = Reg(fspec.globalHistoryType()) init (0)
 
+  val btbTagSize = 8 bits
+
   case class BtbEntry() extends Bundle {
     val valid = Bool()
-    val from = fspec.addrType()
+    val tag = Bits(btbTagSize)
     val to = fspec.addrType()
+  }
+
+  def getBtbTagForPC(pc: UInt): Bits = {
+    val x = Bits(btbTagSize)
+    x := (pcWordAddr(pc).asBits >> fspec.btbWidth.value).resized
+    x
   }
 
   object GsharePreference extends SpinalEnum(binarySequential) {
@@ -142,6 +150,13 @@ case class FetchUnit() extends Area {
     }
   }
 
+  def gshareHash(pc: UInt, globalHistory: Bits): UInt = {
+    (globalHistory ^ (pcWordAddr(pc) >> 2)
+      .resize(fspec.globalHistoryWidth)
+      .asBits
+      .reversed).asUInt
+  }
+
   // PC generation
   val pcStreamGen = new Area {
     val valid = Reg(Bool()) init (true)
@@ -162,14 +177,15 @@ case class FetchUnit() extends Area {
       btb.init((0 until fspec.btbSize).map(_ => {
         val e = BtbEntry()
         e.valid := False
-        e.from := 0
+        e.tag := 0
         e.to := 0
         e
       }))
     val btbEntry = btb(
       pcWordAddr(pcStreamGen.pc.pc).resize(fspec.btbWidth)
     )
-    val btbHit = btbEntry.valid && btbEntry.from === pcStreamGen.pc.pc
+    val btbHit =
+      btbEntry.valid && btbEntry.tag === getBtbTagForPC(pcStreamGen.pc.pc)
     pcStream.payload.predictedBranchValid := btbHit
     pcStream.payload.predictedBranchTarget := btbEntry.to
 
@@ -244,14 +260,12 @@ case class FetchUnit() extends Area {
     object GshareEntry {
       def idle: GshareEntry = {
         val x = GshareEntry()
-        x.valid := False
         x.taken := GsharePreference.weaklyTaken
         x
       }
     }
 
     case class GshareEntry() extends Bundle {
-      val valid = Bool()
       val taken = GsharePreference()
     }
     val gshareMem = Mem(GshareEntry(), fspec.globalHistorySize)
@@ -266,24 +280,17 @@ case class FetchUnit() extends Area {
     gshareMem.write(gshareMemWriteAddr, gshareMemWriteData, gshareMemWriteValid)
 
     val gshareQuery = gshareMem(
-      (s1.data.globalHistory ^ pcWordAddr(s1.out.pc)
-        .resize(fspec.globalHistoryWidth)
-        .asBits).asUInt
+      gshareHash(pc = s1.out.pc, globalHistory = s1.data.globalHistory)
     )
     when(s1.out.fire) {
       val decision = False
       when(io.branchInfoFeedback.isConditionalBranch) {
-        when(gshareQuery.valid) {
-          when(gshareQuery.taken === GsharePreference.stronglyNotTaken) {
-            decision := False
-          } elsewhen (gshareQuery.taken === GsharePreference.weaklyNotTaken || gshareQuery.taken === GsharePreference.weaklyTaken) {
-            decision := io.branchInfoFeedback.backward
-          } otherwise {
-            decision := True
-          }
-        } otherwise {
-          // Predict backward branches to be taken by default, if dynamic information is not available
+        when(gshareQuery.taken === GsharePreference.stronglyNotTaken) {
+          decision := False
+        } elsewhen (gshareQuery.taken === GsharePreference.weaklyNotTaken || gshareQuery.taken === GsharePreference.weaklyTaken) {
           decision := io.branchInfoFeedback.backward
+        } otherwise {
+          decision := True
         }
         s1.data.predictedBranchValid := decision
         s1.data.predictedBranchTarget := io.branchInfoFeedback.target
@@ -332,7 +339,7 @@ case class FetchUnit() extends Area {
 
         val btbEntry = BtbEntry()
         btbEntry.valid := decision
-        btbEntry.from := s1.out.pc
+        btbEntry.tag := getBtbTagForPC(s1.out.pc)
         btbEntry.to := next
 
         lowLatencyPredictor.btbWriteValid := True
@@ -429,12 +436,12 @@ case class FetchUnit() extends Area {
           True -> exc.exc.brDstAddr.asUInt
         )
 
-        val addr = (theirFetchPacket.globalHistory.resize(
-          s2.gshareMemWriteAddr.getWidth
-        ) ^ pcWordAddr(theirFetchPacket.pc).asBits.resized).asUInt
+        val addr = gshareHash(
+          pc = theirFetchPacket.pc,
+          globalHistory = theirFetchPacket.globalHistory
+        )
         val prev = s2.gshareMem(addr)
         s2.gshareMemWriteAddr := addr
-        s2.gshareMemWriteData.valid := True
         s2.gshareMemWriteData.taken := exc.exc.brTaken ? GsharePreference.inc(
           prev.taken
         ) | GsharePreference.dec(prev.taken)
@@ -447,7 +454,7 @@ case class FetchUnit() extends Area {
         } otherwise {
           val btbEntry = BtbEntry()
           btbEntry.valid := True
-          btbEntry.from := theirFetchPacket.pc
+          btbEntry.tag := getBtbTagForPC(theirFetchPacket.pc)
           btbEntry.to := exc.exc.brDstAddr.asUInt
           lowLatencyPredictor.btbWriteValid := True
           lowLatencyPredictor.btbWriteAddr := pcWordAddr(
