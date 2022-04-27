@@ -344,6 +344,7 @@ class TestIssue extends AnyFunSuite {
               .tag #= funcUnit
             p.decode.archDstRegs(0).valid #= true
             p.decode.archSrcRegs(0).valid #= true
+            p.decode.archSrcRegs(0).waitValue #= true
             p.decode.archSrcRegs(1).valid #= false
           }
         )

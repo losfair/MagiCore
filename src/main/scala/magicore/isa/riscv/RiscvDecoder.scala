@@ -61,6 +61,7 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
   val fuTag = mspec.functionUnitTagType()
   val earlyExc = EarlyException()
   val immType = ImmType()
+  val isStore = Bool()
 
   def parentObjects = Seq(fetch)
 
@@ -72,8 +73,10 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
     } else if (ctag == classTag[DecodeInfo]) {
       val x = DecodeInfo(null)
       x.archSrcRegs(0).valid := rs1Valid
+      x.archSrcRegs(0).waitValue := True
       x.archSrcRegs(0).index := fetch.insn(E.rs1Range).asUInt
       x.archSrcRegs(1).valid := rs2Valid
+      x.archSrcRegs(1).waitValue := !isStore
       x.archSrcRegs(1).index := fetch.insn(E.rs2Range).asUInt
       x.archDstRegs(0).valid := rdValid
       x.archDstRegs(0).index := fetch.insn(E.rdRange).asUInt
@@ -255,6 +258,7 @@ case class RiscvDecoder(
   out.rs2Valid := False
   out.rdValid := False
   out.earlyExc.assignDontCare()
+  out.isStore := False
 
   val outPatched = DecodePacket()
   outPatched.rs1Valid := out.rs1Valid && insn(E.rs1Range).asUInt =/= 0
@@ -360,6 +364,7 @@ case class RiscvDecoder(
       out.rs2Valid := True
       out.fuTag := lsuPort
       out.immType := ImmType.S
+      out.isStore := True
     }
     is(E.MUL, E.MULH, E.MULHSU, E.MULHU) {
       out.rdValid := True

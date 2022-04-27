@@ -171,11 +171,14 @@ class TestBackendPipeline extends AnyFunSuite {
         setPredicateInsteadOfBranch: Boolean = false,
         opc: SpinalEnumElement[GenericOpcode.type],
         predictedBranch: Option[BigInt] = None,
-        doNotUseConst: Boolean = false
+        doNotUseConst: Boolean = false,
+        waitValueForRs2: Boolean = true
     ) {
       out.decode.archSrcRegs(0).valid #= rs1.isDefined
+      out.decode.archSrcRegs(0).waitValue #= true
       out.decode.archSrcRegs(0).index #= rs1.getOrElse(0)
       out.decode.archSrcRegs(1).valid #= rs2.isDefined
+      out.decode.archSrcRegs(1).waitValue #= waitValueForRs2
       out.decode.archSrcRegs(1).index #= rs2.getOrElse(0)
       out.decode.archDstRegs(0).valid #= rd.isDefined
       out.decode.archDstRegs(0).index #= rd.getOrElse(0)
@@ -871,7 +874,8 @@ class TestBackendPipeline extends AnyFunSuite {
                   rs2 = Some(rs2),
                   const = Some(0),
                   rd = None,
-                  opc = GenericOpcode.ST_W
+                  opc = GenericOpcode.ST_W,
+                  waitValueForRs2 = false
                 )
               })
 
@@ -933,7 +937,8 @@ class TestBackendPipeline extends AnyFunSuite {
                   rs2 = Some(rs2),
                   const = Some(0),
                   rd = None,
-                  opc = GenericOpcode.ST_B
+                  opc = GenericOpcode.ST_B,
+                  waitValueForRs2 = false
                 )
               })
 

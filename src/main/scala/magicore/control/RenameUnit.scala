@@ -144,7 +144,7 @@ case class RenameUnit[T <: PolymorphicDataChain](
       Seq("renamed src: ") ++ decodeInfo.archSrcRegs
         .zip(output.physSrcRegs)
         .flatMap({ case (arch, phys) =>
-          Seq("[v=", arch.valid, ",arch=", arch.index, ",phys=", phys, "]")
+          Seq("[v=", arch.valid, ",wait=", arch.waitValue, ",arch=", arch.index, ",phys=", phys, "]")
         })
     )
     Machine.report(

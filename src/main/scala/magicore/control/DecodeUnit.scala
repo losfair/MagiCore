@@ -6,6 +6,7 @@ import magicore.util._
 
 case class MaybeArchRegIndex() extends Bundle {
   val valid = Bool()
+  val waitValue = Bool()
   val index = Machine.get[MachineSpec].archRegIndexType
 }
 

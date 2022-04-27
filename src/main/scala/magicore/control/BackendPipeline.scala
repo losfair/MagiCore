@@ -67,7 +67,7 @@ case class BackendPipeline[T <: PolymorphicDataChain](inputType: HardType[T])
   rename.io.output >> dispatch.io.input
 
   Machine.get[MachineException].resetArea {
-    dispatch.io.oooOutput >/-> oooIssue.io.input
+    dispatch.io.oooOutput.queueLowLatency(8, latency = 1) >> oooIssue.io.input
     if (inOrderIssue != null)
       dispatch.io.inOrderOutput >/-> inOrderIssue.io.input
     else

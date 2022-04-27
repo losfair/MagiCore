@@ -46,13 +46,13 @@ case class InOrderIssueUnit[T <: PolymorphicDataChain](
   val dataReady = decodeInfo.archSrcRegs
     .zip(renameInfo.physSrcRegs)
     .map({ case (arch, phys) =>
-      !arch.valid || prf.state.table(phys).dataAvailable
+      !arch.valid || !arch.waitValue || prf.state.table(phys).dataAvailable
     })
     .andR
 
   val issuePort = issueDataType
   for ((r, i) <- issuePort.srcRegData.zipWithIndex) {
-    r := decodeInfo.archSrcRegs(i).valid ? prf
+    r := (decodeInfo.archSrcRegs(i).valid && decodeInfo.archSrcRegs(i).waitValue) ? prf
       .readAsync(renameInfo.physSrcRegs(i))
       .data | B(0, r.getWidth bits)
   }
@@ -108,7 +108,7 @@ case class InOrderIssueUnit[T <: PolymorphicDataChain](
       ) ++ decodeInfo.archSrcRegs
         .zip(renameInfo.physSrcRegs)
         .flatMap({ case (arch, phys) =>
-          Seq("[v=", arch.valid, " arch=", arch.index, " phys=", phys, "]")
+          Seq("[v=", arch.valid, " wait=", arch.waitValue, " arch=", arch.index, " phys=", phys, "]")
         })
     )
   }
@@ -124,7 +124,7 @@ case class InOrderIssueUnit[T <: PolymorphicDataChain](
       ) ++ decodeInfo.archSrcRegs
         .zip(renameInfo.physSrcRegs)
         .flatMap({ case (arch, phys) =>
-          Seq("[v=", arch.valid, " arch=", arch.index, " phys=", phys, "]")
+          Seq("[v=", arch.valid, " wait=", arch.waitValue, " arch=", arch.index, " phys=", phys, "]")
         })
     )
     val epochMgr = Machine.get[EpochManager]

@@ -150,7 +150,7 @@ case class IssueQueue[T <: PolymorphicDataChain](
     t.priority := 0
     t.dependencies := Vec(
       decodeInfo.archSrcRegs
-        .map(_.valid)
+        .map(x => x.valid && x.waitValue)
         .zip(renameInfo.physSrcRegs)
         .map(arg => {
           val (valid, physRegIndex) = arg
@@ -372,7 +372,9 @@ case class IssueUnit[T <: PolymorphicDataChain](
     issueRequest.ready := unifiedIssuePort.ready
     unifiedIssuePort.payload.srcRegData := Vec(
       srcRegContent.zipWithIndex.map { case (x, i) =>
-        decodeInfo.archSrcRegs(i).valid ? x.data | B(0, x.data.getWidth bits)
+        (decodeInfo.archSrcRegs(i).valid && decodeInfo
+          .archSrcRegs(i)
+          .waitValue) ? x.data | B(0, x.data.getWidth bits)
       }
     )
     unifiedIssuePort.payload.data := iqContent.data

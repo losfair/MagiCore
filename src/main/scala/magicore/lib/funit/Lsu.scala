@@ -74,7 +74,6 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
 
   case class PendingStore() extends Bundle {
     val addr = spec.dataType
-    val data = spec.dataType
     val strb = strbType()
   }
 
@@ -105,7 +104,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
 
   case class LsuReq() extends Bundle {
     val addr = spec.dataType
-    val data = spec.dataType
+    val dataPhysRegIndex = spec.physRegIndexType
     val strb = Bits((spec.dataWidth.value / 8) bits)
     val isFence = Bool()
     val isStore = Bool()
@@ -161,6 +160,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
   override def generate(
       hardType: HardType[_ <: PolymorphicDataChain]
   ): FunctionUnitInstance = {
+    val prfIf = Machine.get[PrfInterface]
     new LsuInstance {
 
       val io_available = null
@@ -172,9 +172,14 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
       val epochMgr = Machine.get[EpochManager]
 
       val outStream_pipeline = Stream(CommitRequest(null))
+      val outStream_storeWait = Stream(CommitRequest(null))
       val outStream_oooRead = Stream(CommitRequest(null))
       val arbitratedStream = StreamArbiterFactory.lowerFirst.on(
-        Seq(outStream_oooRead.stage(), outStream_pipeline.stage())
+        Seq(
+          outStream_oooRead.stage(),
+          outStream_storeWait.stage(),
+          outStream_pipeline.stage()
+        )
       )
       arbitratedStream >> io_output
 
@@ -186,6 +191,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
       axiM.b << io_axiMaster.b
 
       val pendingStores = Mem(PendingStore(), spec.robSize)
+      val pendingStoreData = Mem(spec.dataType, spec.robSize)
 
       val oooLoadContexts = Mem(OooLoadContext(), spec.robSize)
 
@@ -308,14 +314,13 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
       val firstStageLogic = new Area {
         val in = io_input.payload
         val op = in.lookup[LsuOperation]
+        val rename = in.lookup[RenameInfo]
         val dispatch = in.lookup[DispatchInfo]
         val issue = in.lookup[IssuePort[_]]
 
         val req = LsuReq()
         req.addr := (issue.srcRegData(0).asSInt + op.offset.resized).asBits
-        req.data := (issue.srcRegData(1) << (req
-          .addr(byteOffsetWidth.value - 1 downto 0)
-          .asUInt << 3)).resized
+        req.dataPhysRegIndex := rename.physSrcRegs(1)
         req.isFence := op.isFence
         req.isStore := op.isStore
         req.size := op.size
@@ -325,12 +330,45 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         val out = io_input.translateWith(req).pipelined(m2s = true, s2m = true)
       }
 
+      case class StoreDataWaitReq() extends Bundle {
+        val token = CommitToken()
+        val dataPhysReg = spec.physRegIndexType
+        val shift = UInt(byteOffsetWidth)
+      }
+
+      val storeDataWaitLogic = new Area {
+        val input = Stream(StoreDataWaitReq())
+        input.setIdle()
+
+        val req = input.queueLowLatency(8, latency = 1)
+        val dataAvailable =
+          prfIf.state.table(req.payload.dataPhysReg).dataAvailable
+
+        val commitReq = CommitRequest(null)
+        commitReq.exception := MachineException.idle
+        commitReq.regWriteValue.assignDontCare()
+        commitReq.token := req.payload.token
+
+        val epochMismatch = req.payload.token.epoch =/= epochMgr.currentEpoch
+        outStream_storeWait << req
+          .continueWhen(
+            dataAvailable || epochMismatch
+          )
+          .translateWith(commitReq)
+
+        val data = prfIf.readAsync(req.dataPhysReg).data
+        pendingStoreData.write(
+          address = req.payload.token.robIndex,
+          data = (data << (req.shift << 3)).resize(data.getWidth),
+          enable = req.fire
+        )
+      }
+
       val pipelineLogic = new Area {
         val req = firstStageLogic.out
 
         val pendingStore = PendingStore()
         pendingStore.addr := req.payload.addr
-        pendingStore.data := req.payload.data
         pendingStore.strb := req.payload.strb
 
         val shouldWritePendingStore = False
@@ -363,24 +401,24 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               req.payload.token.robIndex
             )
 
-            val commitReq = CommitRequest(null)
-            commitReq.exception := MachineException.idle
-            commitReq.regWriteValue.assignDontCare()
-            commitReq.token := req.payload.token
+            val dataReq = StoreDataWaitReq()
+            dataReq.dataPhysReg := req.payload.dataPhysRegIndex
+            dataReq.shift := req.payload.addr.resize(byteOffsetWidth).asUInt
+            dataReq.token := req.payload.token
 
             val ok =
               previousStoreCompleted && storeBufferAllocLogic.allocOk
-            outStream_pipeline.valid := ok
-            outStream_pipeline.payload := commitReq
-            req.ready := ok && outStream_pipeline.ready
+            outStream_pipeline.setIdle()
+
+            storeDataWaitLogic.input.valid := ok
+            storeDataWaitLogic.input.payload := dataReq
+            req.ready := ok && storeDataWaitLogic.input.ready
 
             when(req.isStall) {
               Machine.report(
                 Seq(
                   "store STALL - addr=",
                   req.payload.addr.asUInt,
-                  " data=",
-                  req.payload.data,
                   " robIndex=",
                   req.payload.token.robIndex,
                   " epoch=",
@@ -424,8 +462,6 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
                 Seq(
                   "store scheduled - addr=",
                   req.payload.addr.asUInt,
-                  " data=",
-                  req.payload.data,
                   " robIndex=",
                   req.payload.token.robIndex,
                   " epoch=",
@@ -527,7 +563,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         axiM.aw << popToAw.translateWith(aw)
 
         val w = Axi4W(axiConfig)
-        w.data := store.data
+        w.data := pendingStoreData(robIndex)
         w.strb := store.strb
         w.last := True
         axiM.w << popToW.translateWith(w)
@@ -540,7 +576,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               " addr=",
               store.addr,
               ", data=",
-              store.data
+              w.data
             )
           )
         }
