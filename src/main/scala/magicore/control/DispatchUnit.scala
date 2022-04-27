@@ -339,7 +339,7 @@ case class DispatchUnit[T <: PolymorphicDataChain](
           when(fireNow) {
             assert(
               !oldEntry.completed,
-              "Commit request for completed ROB entry"
+              Seq("Commit request for completed ROB entry: ", commit.payload.token.robIndex)
             )
             selectedEntry := oldEntry
             selectedEntryValid := True
