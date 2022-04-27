@@ -29,16 +29,17 @@ case class MiniRv32() extends Component {
   val numExternalInterrupts = 16
   val numInternalInterrupts = 1
 
-  val bootrom = Axi4SharedOnChipRam(
+  val bootromBackingStore = Mem(Bits(32 bits), 16384)
+  bootromBackingStore.initFromFile("./fsbl/firmware.bin")
+  val bootromAxi = Axi4Rom(mem = bootromBackingStore, config = Axi4Config(
+    addressWidth = 32,
     dataWidth = 32,
-    byteCount = 16384,
     idWidth = slaveIdWidth
-  )
-  bootrom.ram.initFromFile("./fsbl/firmware.bin")
+  ))
 
   val ocram = Axi4SharedOnChipRam(
     dataWidth = 32,
-    byteCount = 65536,
+    byteCount = 16384,
     idWidth = slaveIdWidth
   )
 
@@ -132,8 +133,8 @@ case class MiniRv32() extends Component {
 
   var axiCrossbar = Axi4CrossbarFactory()
   axiCrossbar.addSlaves(
-    bootrom.io.axi -> SizeMapping(0x00010000, 16384), // TODO: Error on writes
-    ocram.io.axi -> SizeMapping(0x00020000, 65536),
+    bootromAxi -> SizeMapping(0x00010000, bootromBackingStore.byteCount),
+    ocram.io.axi -> SizeMapping(0x00020000, ocram.byteCount),
     io.bus -> SizeMapping(0x40000000, 2 GiB),
     uart.io.axi -> SizeMapping(BigInt("ff010000", 16), 0x100),
     masCtrl.io.bus -> SizeMapping(BigInt("ff010100", 16), 0x100),
@@ -142,9 +143,9 @@ case class MiniRv32() extends Component {
     masDataAxi -> SizeMapping(BigInt("ff100000", 16), mas.bufferSizeInBytes)
   )
   axiCrossbar.addConnections(
-    processor.io.iBus -> Seq(bootrom.io.axi, ocram.io.axi, io.bus),
+    processor.io.iBus -> Seq(bootromAxi, ocram.io.axi, io.bus),
     processor.io.dBus -> Seq(
-      bootrom.io.axi,
+      bootromAxi,
       ocram.io.axi,
       io.bus,
       uart.io.axi,
