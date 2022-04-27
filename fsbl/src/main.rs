@@ -9,10 +9,12 @@ use core::arch::asm;
 use core::fmt::Write;
 use core::panic::PanicInfo;
 
-use reg::CLINT_TIME;
+use reg::{CLINT_TIME, INTC_PENDINGS};
 use riscv::register::mstatus::MPP;
 use sync::io_read;
 
+use crate::reg::{INTC_MASKS, MAS_SOFT_ENABLE, MAS_BUFFER_PTR};
+use crate::sync::io_write;
 use crate::uart::UartPort;
 
 core::arch::global_asm!(include_str!("entry.asm"));
@@ -39,28 +41,42 @@ impl IntrContext {
 }
 
 #[no_mangle]
-pub extern "C" fn rust_main() -> ! {
-  writeln!(UartPort, "MagiCore FSBL. t={}", unsafe {
-    io_read(CLINT_TIME)
-  })
-  .unwrap();
-  unsafe {
-    do_ecall(42, 0, 0, 0);
-  }
-  writeln!(UartPort, "Exception OK.").unwrap();
-  writeln!(UartPort, "Jumping to user code.").unwrap();
-  unsafe {
-    riscv::register::mstatus::set_mpp(MPP::User);
-    riscv::register::mstatus::set_mpie();
-    riscv::register::mepc::write(0x80000000);
-    asm!("mret");
-    loop {}
-  }
+pub unsafe extern "C" fn rust_main() -> ! {
+  writeln!(UartPort, "MagiCore FSBL. t={}", io_read(CLINT_TIME)).unwrap();
+  do_ecall(42, 0, 0, 0);
+
+  // Enable MAS
+  riscv::register::mie::set_mext();
+  io_write(INTC_MASKS, 1u32 << 16); // MAS interrupt
+  io_write(MAS_SOFT_ENABLE, 1);
+  writeln!(UartPort, "MAS enabled. Jumping to user code.").unwrap();
+
+  // Jump to user program
+  //riscv::register::mstatus::set_mpp(MPP::User);
+  riscv::register::mstatus::set_mpp(MPP::User);
+  riscv::register::mstatus::set_mpie();
+  riscv::register::mepc::write(0x80000000);
+  asm!("mret");
+  loop {}
 }
 
 #[panic_handler]
 fn on_panic(_info: &PanicInfo) -> ! {
   loop {}
+}
+
+unsafe fn handle_ext_interrupt(ctx: &mut IntrContext) {
+  // Query INTC
+  let pending = io_read(INTC_PENDINGS);
+  if pending & (1 << 16) != 0 {
+    // MAS interrupt
+    let ptr = io_read(MAS_BUFFER_PTR);
+    writeln!(UartPort, "MAS buffer ptr = 0x{:08x}", ptr).unwrap();
+    let ptr = io_read(MAS_BUFFER_PTR);
+    writeln!(UartPort, "MAS buffer ptr = 0x{:08x}", ptr).unwrap();
+    io_write(MAS_BUFFER_PTR, 0);
+    io_write(INTC_PENDINGS, 1u32 << 16);
+  }
 }
 
 #[no_mangle]
@@ -73,15 +89,14 @@ pub unsafe extern "C" fn rust_intr_entry(ctx: &mut IntrContext) {
   asm!("csrr {mtval}, mtval", mtval = out(reg) mtval);
 
   match mcause {
-    8 => {
-      // ECALL from U mode
+    8 | 11 => {
+      // ECALL from U (8) or M (11) mode
       handle_ecall(ctx);
       riscv::register::mepc::write(mepc + 4);
     }
-    11 => {
-      // ECALL from M mode
-      writeln!(UartPort, "ECALL from M").unwrap();
-      riscv::register::mepc::write(mepc + 4);
+    0x8000000b => {
+      // External interrupt
+      handle_ext_interrupt(ctx);
     }
     _ => {
       writeln!(

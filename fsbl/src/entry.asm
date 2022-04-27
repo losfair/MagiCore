@@ -33,7 +33,7 @@ _start:
     li x29, 0
     li x30, 0
     li x31, 0
-    li sp, 0x30000
+    li sp, 0x24000
 
     la a0, _intr_entry
     csrw mtvec, a0
