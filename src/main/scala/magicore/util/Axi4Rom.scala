@@ -12,26 +12,22 @@ object Axi4Rom {
 
     val axi = Axi4ReadOnly(config)
 
-    val (reqToStage, reqToRead) = StreamFork2(axi.ar)
-
-    val output =
-      mem.streamReadSync(
-        reqToRead.translateWith(
-          reqToRead.payload.addr(
-            (byteIndexSize + log2Up(mem.wordCount) - 1) downto byteIndexSize
-          )
-        )
+    val req = axi.ar.unburstify
+    val data = mem.readSync(
+      req.payload.addr(
+        (byteIndexSize + log2Up(mem.wordCount) - 1) downto byteIndexSize
       )
-    val reqStaged = reqToStage.stage()
+    )
+    val reqStaged = req.stage()
 
     val to = Axi4R(config)
     if (config.useId) to.id := reqStaged.id
-    if (config.useLast) to.last := True
-    to.data := output.payload.asBits
+    if (config.useLast) to.last := reqStaged.last
+    to.data := data.asBits
     to.setOKAY()
     if (config.useRUser) to.user := reqStaged.user
 
-    axi.r <-/< StreamJoin(output, reqStaged).translateWith(to)
+    axi.r <-/< reqStaged.translateWith(to)
     axi
   }
 }
