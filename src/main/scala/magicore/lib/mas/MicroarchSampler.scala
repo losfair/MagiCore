@@ -50,7 +50,7 @@ case class MicroarchSampler(
 
   io.irq := isEnabled && bufferPtr >= numSamples - intrThreshold
 
-  val bufferWriter = new ClockEnableArea(clockEnable = isEnabled) {
+  when(isEnabled) {
     buffer.write(bufferPtr, regSample)
     when(bufferPtr =/= bufferPtr.maxValue) {
       bufferPtr := bufferPtr + 1
