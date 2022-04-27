@@ -265,11 +265,13 @@ case class RiscvDecoder(
   when(out.fetch.cacheMiss) {
     outPatched.fuTag := earlyExceptionPort
     outPatched.earlyExc.code := MachineExceptionCode.INSN_CACHE_MISS
+    wantStall := True
   }
 
   when(intrSvc.trigger) {
     outPatched.fuTag := earlyExceptionPort
     outPatched.earlyExc.code := MachineExceptionCode.EXT_INTERRUPT
+    wantStall := True
   }
 
   val discardOutput = False
