@@ -9,7 +9,7 @@ use core::arch::asm;
 use core::fmt::Write;
 use core::panic::PanicInfo;
 
-use reg::{CLINT_TIME, INTC_PENDINGS};
+use reg::{CLINT_TIME, INTC_PENDINGS, MAS_DATA, MAS_SIZE};
 use riscv::register::mstatus::MPP;
 use sync::io_read;
 
@@ -18,9 +18,11 @@ use crate::sync::io_write;
 use crate::uart::UartPort;
 
 core::arch::global_asm!(include_str!("entry.asm"));
+core::arch::global_asm!(include_str!("memcpy.asm"));
 
 extern "C" {
   fn do_ecall(a0: usize, a1: usize, a2: usize, a3: usize) -> usize;
+  fn memcpy_u32(dst: *mut u32, src: *mut u32, n: usize);
 }
 
 #[repr(C)]
@@ -42,7 +44,7 @@ impl IntrContext {
 
 #[no_mangle]
 pub unsafe extern "C" fn rust_main() -> ! {
-  writeln!(UartPort, "MagiCore FSBL. t={}", io_read(CLINT_TIME)).unwrap();
+  writeln!(UartPort, "MagiCore FSBL").unwrap();
   do_ecall(42, 0, 0, 0);
 
   // Enable MAS
@@ -65,15 +67,16 @@ fn on_panic(_info: &PanicInfo) -> ! {
   loop {}
 }
 
-unsafe fn handle_ext_interrupt(ctx: &mut IntrContext) {
+unsafe fn handle_ext_interrupt(_ctx: &mut IntrContext) {
   // Query INTC
   let pending = io_read(INTC_PENDINGS);
   if pending & (1 << 16) != 0 {
     // MAS interrupt
-    let ptr = io_read(MAS_BUFFER_PTR);
-    writeln!(UartPort, "MAS buffer ptr = 0x{:08x}", ptr).unwrap();
-    let ptr = io_read(MAS_BUFFER_PTR);
-    writeln!(UartPort, "MAS buffer ptr = 0x{:08x}", ptr).unwrap();
+    let count = io_read(MAS_BUFFER_PTR) as usize;
+    let start = riscv::register::cycle::read();
+    memcpy_u32(0x80800000 as *mut u32, MAS_DATA, count);
+    let end = riscv::register::cycle::read();
+    writeln!(UartPort, "Memory copy of {} bytes took {} cycles", count * 4, end - start).unwrap();
     io_write(MAS_BUFFER_PTR, 0);
     io_write(INTC_PENDINGS, 1u32 << 16);
   }
