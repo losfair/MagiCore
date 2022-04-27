@@ -80,7 +80,7 @@ case class MicroarchSampler(
   }
 
   def toAxi4ReadOnly(idWidth: Int): Axi4ReadOnly = {
-    Axi4Rom(
+    val port = Axi4Rom(
       buffer,
       Axi4Config(
         addressWidth = 32,
@@ -88,6 +88,11 @@ case class MicroarchSampler(
         idWidth = idWidth
       )
     )
+    val out = Axi4ReadOnly(port.config)
+    out.ar.pipelined(m2s = true, s2m = true) >> port.ar
+    port.r.pipelined(m2s = true, s2m = true) >> out.r
+
+    out
   }
 }
 

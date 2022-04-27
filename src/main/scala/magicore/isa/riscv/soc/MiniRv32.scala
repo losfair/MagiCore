@@ -61,7 +61,7 @@ case class MiniRv32() extends Component {
 
   val mas = new MicroarchSampler(
     sampleWidth = 32 bits,
-    bufferSizeInBytes = 256 KiB,
+    bufferSizeInBytes = 512 KiB,
     intrThreshold = 1000
   )
   mas.io.enable := processor.csr.csrFile.priv === RvPrivLevel.U
