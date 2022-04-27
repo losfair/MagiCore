@@ -87,7 +87,7 @@ async def first_test(dut):
     print("begin it")
     dut.rst.value = 1
     dut.uart_rxd.value = 1  # prevent break
-    dut.core_interrupt.value = 0
+    dut.core_interrupts.value = 0
     cocotb.start_soon(Clock(dut.clk, 20, units="ns").start())
     await RisingEdge(dut.clk)
     await RisingEdge(dut.clk)

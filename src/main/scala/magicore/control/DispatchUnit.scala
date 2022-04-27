@@ -73,6 +73,8 @@ case class RobHeadInfo() extends Area {
   val headPtr = spec.robEntryIndexType()
 }
 
+case class WritebackMonitor(lanes: Vec[Flow[CommitRequest]])
+
 case class DispatchPerfCounters(instRetired: UInt)
 
 case class DispatchUnit[T <: PolymorphicDataChain](
@@ -103,10 +105,12 @@ case class DispatchUnit[T <: PolymorphicDataChain](
     val commitInO =
       Vec(Stream(commitRequestType), sem.functionUnits.count(x => x.inOrder))
     val writebackMonitor = Vec(
-      Flow(CommitRequest(dataType, genRegWriteValue = false)),
+      Flow(CommitRequest(dataType, genRegWriteValue = false, genBrStats = true)),
       spec.writebackWidth
     )
   }
+
+  Machine.provide(WritebackMonitor(io.writebackMonitor))
 
   val epochMgr = Machine.get[EpochManager]
   val commitGroups = Seq(

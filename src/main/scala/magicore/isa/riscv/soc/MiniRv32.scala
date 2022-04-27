@@ -13,6 +13,9 @@ import spinal.lib.bus.misc.SizeMapping
 import spinal.lib.com.uart.Axi4UartCtrl
 import spinal.lib.com.uart.UartCtrlMemoryMappedConfig
 import spinal.lib.com.uart.Uart
+import magicore.lib.mas.MicroarchSampler
+import magicore.lib.mas.Axi4MicroarchSamplerCtrl
+import spinal.lib.misc.InterruptCtrl
 
 case class MiniRv32() extends Component {
   val debug = false
@@ -23,6 +26,8 @@ case class MiniRv32() extends Component {
   )
 
   val slaveIdWidth = 16
+  val numExternalInterrupts = 16
+  val numInternalInterrupts = 1
 
   val bootrom = Axi4SharedOnChipRam(
     dataWidth = 32,
@@ -49,6 +54,60 @@ case class MiniRv32() extends Component {
   )
 
   val clint = new Axi4Clint(hartCount = 1, idWidth = slaveIdWidth)
+  val intrController =
+    new Axi4InterruptCtrl(width = numExternalInterrupts + numInternalInterrupts, idWidth = slaveIdWidth)
+
+
+  val mas = new MicroarchSampler(
+    sampleWidth = 32 bits,
+    bufferSizeInBytes = 256 KiB,
+    intrThreshold = 1000
+  )
+  mas.io.enable := processor.csr.csrFile.priv === RvPrivLevel.U
+  intrController.io.inputs(numExternalInterrupts + 0) := mas.io.irq
+  mas.addSignal(
+    "dispatch.ooo.fire",
+    processor.pipeline.dispatch.io.oooOutput.fire
+  )
+  mas.addSignal(
+    "dispatch.ino.fire",
+    processor.pipeline.dispatch.io.inOrderOutput.fire
+  )
+  mas.addSignal(
+    "issue.ooo.fire",
+    processor.pipeline.oooIssue.issuePopApplyLogic.unifiedIssuePort.fire
+  )
+  mas.addSignal(
+    "issue.ino.fire",
+    processor.pipeline.inOrderIssue.popStream.fire
+  )
+  mas.addSignal(
+    "commit.ooo.fire",
+    processor.pipeline.dispatch.io.commitOoO.map(x => x.fire).orR
+  )
+  mas.addSignal(
+    "commit.ino.fire",
+    processor.pipeline.dispatch.io.commitInO.map(x => x.fire).orR
+  )
+  for (
+    (lane, i) <- processor.pipeline.dispatch.io.writebackMonitor.zipWithIndex
+  ) {
+    mas.addSignal(s"retire.lane_$i.fire", lane.fire)
+  }
+
+  val exc = Machine.get[MachineException]
+  mas.addSignal(
+    "exception.fire",
+    exc.valid
+  )
+  mas.addSignal(
+    "exception.code",
+    exc.valid ? exc.code.asBits.resize(5 bits) | 0
+  )
+
+  val masCtrl =
+    new Axi4MicroarchSamplerCtrl(sampler = mas, idWidth = slaveIdWidth)
+  val masDataAxi = mas.toAxi4ReadOnly(slaveIdWidth)
 
   val io = new Bundle {
     val bus = master(
@@ -60,12 +119,14 @@ case class MiniRv32() extends Component {
         )
       )
     )
-    val interrupt = in(Bool())
+    val interrupts = in(Bits(numExternalInterrupts bits))
     val uart = master(Uart())
   }
 
+  intrController.io.inputs(numExternalInterrupts - 1 downto 0) := io.interrupts
+
   io.uart <> uart.io.uart
-  processor.io.interrupt.external := io.interrupt
+  processor.io.interrupt.external := intrController.io.pendings.orR
   processor.io.interrupt.timer := clint.io.timerInterrupt(0)
   processor.io.interrupt.software := clint.io.softwareInterrupt(0)
 
@@ -75,7 +136,10 @@ case class MiniRv32() extends Component {
     ocram.io.axi -> SizeMapping(0x00020000, 65536),
     io.bus -> SizeMapping(0x40000000, 2 GiB),
     uart.io.axi -> SizeMapping(BigInt("ff010000", 16), 0x100),
-    clint.io.bus -> SizeMapping(BigInt("ff020000", 16), 0x10000)
+    masCtrl.io.bus -> SizeMapping(BigInt("ff010100", 16), 0x100),
+    intrController.io.bus -> SizeMapping(BigInt("ff010200", 16), 0x100),
+    clint.io.bus -> SizeMapping(BigInt("ff020000", 16), 0x10000),
+    masDataAxi -> SizeMapping(BigInt("ff100000", 16), mas.bufferSizeInBytes)
   )
   axiCrossbar.addConnections(
     processor.io.iBus -> Seq(bootrom.io.axi, ocram.io.axi, io.bus),
@@ -84,7 +148,10 @@ case class MiniRv32() extends Component {
       ocram.io.axi,
       io.bus,
       uart.io.axi,
-      clint.io.bus
+      clint.io.bus,
+      intrController.io.bus,
+      masCtrl.io.bus,
+      masDataAxi
     )
   )
 

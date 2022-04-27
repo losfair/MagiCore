@@ -13,7 +13,7 @@ case class RiscvProcessor(
     resetPc: BigInt = 0x0,
     debug: Boolean = false,
     initBranchPredictionBuffers: Boolean = false
-) extends Component {
+) extends Area {
   object FuTag extends SpinalEnum(binarySequential) {
     val ALU, LSU, MUL, DIV, SLOW_ALU, EARLY_EXC, CSR = newElement()
   }
@@ -89,15 +89,15 @@ case class RiscvProcessor(
   fetch.io.branchInfoFeedback := decode.io.branchInfoFeedback
 
   val io = new Bundle {
-    val writebackMonitor = out(
+    val writebackMonitor =
       Vec(
         pipeline.io.writebackMonitor.dataType(),
         pipeline.io.writebackMonitor.size
-      )
-    )
-    val iBus = master(Axi4ReadOnly(fetch.io.memBus.config))
-    val dBus = master(Axi4(lsu.io_axiMaster.config))
-    val interrupt = in(RvInterruptLines())
+      ) // out
+
+    val iBus = Axi4ReadOnly(fetch.io.memBus.config) // master
+    val dBus = Axi4(lsu.io_axiMaster.config) // master
+    val interrupt = RvInterruptLines() // in
   }
 
   intrSvc.setLines(io.interrupt)
@@ -107,21 +107,4 @@ case class RiscvProcessor(
     .foreach(x => x._1 >> x._2)
   fetch.io.memBus >> io.iBus
   lsu.io_axiMaster >> io.dBus
-}
-
-object RiscvProcessorSyncReset {
-  object SyncResetSpinalConfig
-      extends SpinalConfig(
-        defaultConfigForClockDomains = ClockDomainConfig(resetKind = SYNC)
-      )
-
-  def main(args: Array[String]) {
-    SyncResetSpinalConfig.generateVerilog(Machine.build {
-      new RiscvProcessor(
-        resetPc = 0x08000000,
-        debug = false,
-        initBranchPredictionBuffers = true
-      )
-    })
-  }
 }
