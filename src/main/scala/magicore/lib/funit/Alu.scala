@@ -271,7 +271,10 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
 
       if (c.alu32) {
         when(op.alu32) {
-          out.regWriteValue(0) := outValue(31 downto 0).asBits.resized
+          // Sign extension
+          out.regWriteValue(0) := outValue(31 downto 0).asSInt
+            .resize(out.regWriteValue(0).getWidth)
+            .asBits
         } otherwise {
           out.regWriteValue(0) := outValue.asBits
         }

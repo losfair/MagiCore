@@ -75,6 +75,7 @@ case class RiscvProcessor(
 
   val fetch = FetchUnit()
   val decode = RiscvDecoder(
+    rv64 = rv64,
     aluPort = FuTag.ALU,
     earlyExceptionPort = FuTag.EARLY_EXC,
     lsuPort = FuTag.LSU,

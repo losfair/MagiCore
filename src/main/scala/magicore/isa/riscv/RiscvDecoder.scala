@@ -86,7 +86,10 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
       Some(x.asInstanceOf[T])
     } else if (ctag == classTag[AluOperation]) {
       val x = AluOperation()
-      x.alu32 := False
+
+      // `JAL` is an exception that has bit 3 set but should not enable alu32
+      x.alu32 := fetch.insn(3) && fetch.insn(6 downto 2) =/= B"11011"
+
       x.predicated := False
       x.setPredicateInsteadOfBranch := False
       x.brCond := fetch
@@ -156,9 +159,10 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
       x.size := fetch
         .insn(13 downto 12)
         .mux(
-          M"00" -> LsuOperationSize.BYTE.craft(),
-          M"01" -> LsuOperationSize.HALF.craft(),
-          default -> LsuOperationSize.WORD.craft()
+          B"00" -> LsuOperationSize.BYTE.craft(),
+          B"01" -> LsuOperationSize.HALF.craft(),
+          B"10" -> LsuOperationSize.WORD.craft(),
+          B"11" -> LsuOperationSize.DOUBLE.craft()
         )
       x.signExt := !fetch.insn(14)
       Some(x.asInstanceOf[T])
@@ -221,6 +225,7 @@ case class DecodeIntrInjectionInfo() extends Bundle {
 }
 
 case class RiscvDecoder(
+    rv64: Boolean,
     aluPort: Data,
     earlyExceptionPort: Data,
     lsuPort: Data,
@@ -338,11 +343,28 @@ case class RiscvDecoder(
       out.fuTag := aluPort
       out.immType := ImmType.X
     }
+    if (rv64) {
+      is(E.ADDW, E.SUBW, E.SLLW, E.SRLW, E.SRAW) {
+        out.rdValid := True
+        out.rs1Valid := True
+        out.rs2Valid := True
+        out.fuTag := aluPort
+        out.immType := ImmType.X
+      }
+    }
     is(E.ADDI, E.SLTI, E.SLTIU, E.XORI, E.ORI, E.ANDI, E.SLLI, E.SRLI, E.SRAI) {
       out.rdValid := True
       out.rs1Valid := True
       out.fuTag := aluPort
       out.immType := ImmType.I
+    }
+    if (rv64) {
+      is(E.ADDIW, E.SLLIW, E.SRLIW, E.SRAIW) {
+        out.rdValid := True
+        out.rs1Valid := True
+        out.fuTag := aluPort
+        out.immType := ImmType.I
+      }
     }
     is(E.CLZ, E.CTZ) {
       out.rdValid := True
@@ -361,12 +383,29 @@ case class RiscvDecoder(
       out.fuTag := lsuPort
       out.immType := ImmType.I
     }
+    if (rv64) {
+      is(E.LD, E.LWU) {
+        out.rdValid := True
+        out.rs1Valid := True
+        out.fuTag := lsuPort
+        out.immType := ImmType.I
+      }
+    }
     is(E.SB, E.SH, E.SW) {
       out.rs1Valid := True
       out.rs2Valid := True
       out.fuTag := lsuPort
       out.immType := ImmType.S
       out.isStore := True
+    }
+    if (rv64) {
+      is(E.SD) {
+        out.rs1Valid := True
+        out.rs2Valid := True
+        out.fuTag := lsuPort
+        out.immType := ImmType.S
+        out.isStore := True
+      }
     }
     is(E.MUL, E.MULH, E.MULHSU, E.MULHU) {
       out.rdValid := True

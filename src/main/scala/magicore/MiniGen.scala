@@ -78,7 +78,7 @@ class MiniGen extends Component {
       if (ctag == classTag[AluOperation]) {
         val op = AluOperation()
         op.alu32 := alu32
-        op.const := const.asBits.resized
+        op.const := const.asSInt.resize(op.const.getWidth).asBits // sign extension
         op.opcode := GenericOpcode.translateToAlu(opc)._2
         op.predicated := False
         op.replaceOperandBwithConst := replaceOperandBwithConst
