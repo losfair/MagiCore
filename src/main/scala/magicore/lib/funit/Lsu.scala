@@ -289,10 +289,20 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
       }
 
       val writeAckLogic = new Area {
+        val writePipe =
+          new StreamFifoLowLatency(
+            spec.robEntryIndexType(),
+            spec.robSize,
+            latency = 1
+          )
+        writePipe.io.pop.setBlocked()
+
         axiM.b.ready := True
         when(axiM.b.valid) {
-          val robIndex =
-            axiM.b.payload.id.resize(spec.robEntryIndexWidth)
+          assert(writePipe.io.pop.valid, "AXI write ack with an empty pipe")
+          writePipe.io.pop.ready := True
+
+          val robIndex = writePipe.io.pop.payload
           assert(pendingStoreValid_posted(robIndex), "invalid store ack")
           pendingStoreValid_posted(robIndex) := False
           var ok = False
@@ -568,7 +578,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         val (popToAw, popToW) = StreamFork2(popStream)
 
         val aw = Axi4Aw(axiConfig)
-        aw.id := robIndex.resized
+        aw.id := 0
         aw.addr := store.addr.asUInt
         axiM.aw << popToAw.translateWith(aw)
 
@@ -577,6 +587,13 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         w.strb := store.strb
         w.last := True
         axiM.w << popToW.translateWith(w)
+
+        writeAckLogic.writePipe.io.push.valid := popStream.fire
+        writeAckLogic.writePipe.io.push.payload := robIndex
+        assert(
+          !writeAckLogic.writePipe.io.push.isStall,
+          "writePipe push must not stall"
+        )
 
         when(popStream.fire) {
           Machine.report(
