@@ -288,8 +288,6 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
           storeBuffer(storeBufferAllocLogic.firstMatch._2).srcRobIndex
       }
 
-      // This logic block may invalidate a `storeBuffer` entry. So, this logic needs to be
-      // before the `pipelineLogic` block which may write to (update) the same entry.
       val writeAckLogic = new Area {
         axiM.b.ready := True
         when(axiM.b.valid) {
@@ -297,21 +295,24 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
             axiM.b.payload.id.resize(spec.robEntryIndexWidth)
           assert(pendingStoreValid_posted(robIndex), "invalid store ack")
           pendingStoreValid_posted(robIndex) := False
-          val ok = False
+          var ok = False
           for (entry <- storeBuffer) {
-            when(entry.srcRobIndex === robIndex) {
+            val thisOk = False
+            when(entry.valid && entry.srcRobIndex === robIndex) {
               entry.valid := False
-              ok := True
+              assert(!ok, "multiple robIndex matches")
+              thisOk := True
             }
+            ok = ok || thisOk
           }
-          when(ok) {
-            Machine.report(
-              Seq(
-                "store effect ack: robIndex=",
-                robIndex
-              )
+          assert(ok, "did not find matching entry in store buffer")
+
+          Machine.report(
+            Seq(
+              "store effect ack: robIndex=",
+              robIndex
             )
-          }
+          )
         }
       }
 
