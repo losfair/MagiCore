@@ -190,7 +190,14 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
           )).resized
         }
         is(AluOpcode.SRL) {
-          outValue := a >> b(log2Up(spec.dataWidth.value) - 1 downto 0)
+          // So that we don't shift in the sign-extended ones
+          val shiftAmount = b(log2Up(spec.dataWidth.value) - 1 downto 0)
+          if (c.alu32) {
+            outValue := op.alu32 ? (a(31 downto 0) >> shiftAmount)
+              .resize(outValue.getWidth) | (a >> shiftAmount)
+          } else {
+            outValue := a >> shiftAmount
+          }
         }
         is(AluOpcode.SRA) {
           outValue := (a.asSInt >> b(
