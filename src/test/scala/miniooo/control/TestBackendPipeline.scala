@@ -219,7 +219,9 @@ class TestBackendPipeline extends AnyFunSuite {
           pipeline.io.writebackMonitor.size
         )
       )
-      val writebackRegValue = out(Vec(mspec.dataType, pipeline.io.writebackMonitor.size))
+      val writebackRegValue = out(
+        Vec(mspec.dataType, pipeline.io.writebackMonitor.size)
+      )
       val cycles = out(UInt(64 bits))
       val effectOutput = out(Vec(Flow(UInt(32 bits)), 2))
       val memBus = slave(Axi4Shared(lsu.io_axiMaster.config))
@@ -446,7 +448,7 @@ class TestBackendPipeline extends AnyFunSuite {
           }
         }
 
-        val wordMask = ocmSize - ((1 << log2Up(mspec.dataWidth.value / 8)))
+        val addrMask = ocmSize - 1
 
         val startCycles = dut.io.cycles.toBigInt
         var delayCount = 0
@@ -685,7 +687,7 @@ class TestBackendPipeline extends AnyFunSuite {
               val rd = Random.nextInt(mspec.numArchitecturalRegs)
               val rs1 = Random.nextInt(mspec.numArchitecturalRegs)
 
-              val mask = (wordMask >> 2) << 2
+              val mask = (addrMask >> 2) << 2
 
               val addr = mirror(rs1) & mask
               val data = memMirror((addr / (mspec.dataWidth.value / 8)).toInt)
@@ -732,7 +734,7 @@ class TestBackendPipeline extends AnyFunSuite {
               val rd = Random.nextInt(mspec.numArchitecturalRegs)
               val rs1 = Random.nextInt(mspec.numArchitecturalRegs)
 
-              val mask = wordMask
+              val mask = addrMask
 
               val addr = mirror(rs1) & mask
               val bitShift = (addr & ((mspec.dataWidth.value / 8) - 1)) * 8
@@ -782,7 +784,7 @@ class TestBackendPipeline extends AnyFunSuite {
               val rd = Random.nextInt(mspec.numArchitecturalRegs)
               val rs1 = Random.nextInt(mspec.numArchitecturalRegs)
 
-              val mask = wordMask
+              val mask = addrMask
 
               val addr = mirror(rs1) & mask
               val bitShift = (addr & ((mspec.dataWidth.value / 8) - 1)) * 8
@@ -831,7 +833,7 @@ class TestBackendPipeline extends AnyFunSuite {
               // ST_W
               caseCount.update("ST_W", caseCount("ST_W") + 1)
               val rs1 = Random.nextInt(mspec.numArchitecturalRegs)
-              val mask = (wordMask >> 2) << 2
+              val mask = (addrMask >> 2) << 2
               val addr = mirror(rs1) & mask
               mirror.update(rs1, addr)
               if (!expectingException) {
@@ -885,7 +887,7 @@ class TestBackendPipeline extends AnyFunSuite {
               // ST_B
               caseCount.update("ST_B", caseCount("ST_B") + 1)
               val rs1 = Random.nextInt(mspec.numArchitecturalRegs)
-              val mask = wordMask
+              val mask = addrMask
               val addr = mirror(rs1) & mask
               mirror.update(rs1, addr)
               if (!expectingException) {
@@ -898,7 +900,7 @@ class TestBackendPipeline extends AnyFunSuite {
               val byteIndex = addr & ((mspec.dataWidth.value / 8) - 1)
               val newValue = BigInt(
                 memMirror(wordIndex).toByteArray.toSeq.reverse
-                  .padTo(4, 0.toByte)
+                  .padTo(5, 0.toByte)
                   .updated(byteIndex.toInt, mirror(rs2).toByte)
                   .reverse
                   .toArray
