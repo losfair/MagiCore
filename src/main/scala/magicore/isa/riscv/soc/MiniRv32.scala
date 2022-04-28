@@ -27,7 +27,7 @@ case class MiniRv32() extends Component {
 
   val slaveIdWidth = 16
   val numExternalInterrupts = 16
-  val numInternalInterrupts = 1
+  val numInternalInterrupts = 2
 
   val bootromBackingStore = Mem(Bits(32 bits), 16384)
   bootromBackingStore.initFromFile("./fsbl/firmware.bin")
@@ -58,11 +58,6 @@ case class MiniRv32() extends Component {
   )
 
   val clint = new Axi4Clint(hartCount = 1, idWidth = slaveIdWidth)
-  val intrController =
-    new Axi4InterruptCtrl(
-      width = numExternalInterrupts + numInternalInterrupts,
-      idWidth = slaveIdWidth
-    )
 
   val mas = new MicroarchSampler(
     sampleWidth = 32 bits,
@@ -70,7 +65,6 @@ case class MiniRv32() extends Component {
     intrThreshold = 1000
   )
   mas.io.enable := processor.csr.csrFile.priv === RvPrivLevel.U
-  intrController.io.inputs(numExternalInterrupts + 0) := mas.io.irq
   mas.addSignal(
     "dispatch.ooo.fire",
     processor.pipeline.dispatch.io.oooOutput.fire
@@ -133,7 +127,14 @@ case class MiniRv32() extends Component {
     val uart = master(Uart())
   }
 
+  val intrController =
+    new Axi4InterruptCtrl(
+      width = numExternalInterrupts + numInternalInterrupts,
+      idWidth = slaveIdWidth
+    )
   intrController.io.inputs(numExternalInterrupts - 1 downto 0) := io.interrupts
+  intrController.io.inputs(numExternalInterrupts + 0) := mas.io.irq
+  intrController.io.inputs(numExternalInterrupts + 1) := uart.io.interrupt
 
   io.uart <> uart.io.uart
   processor.io.interrupt.external := intrController.io.pendings.orR
