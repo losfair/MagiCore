@@ -5,6 +5,7 @@ import spinal.lib._
 import scala.collection.IterableLike
 import java.io.File
 import java.io.FileInputStream
+import spinal.lib.bus.amba4.axi._
 
 object MagiCoreExt {
   implicit class StreamExt[T <: Data](stream: Stream[T]) {
@@ -143,6 +144,40 @@ object MagiCoreExt {
           .map(x => BigInt((x ++ Array(0.toByte)).reverse))
           .toSeq
       mem.initBigInt(content)
+    }
+  }
+
+  implicit class Axi4Ext[T <: Data](axi: Axi4) {
+    def createDownsizerOnSlaveSide(inputSize: Int): Axi4 = {
+      if (inputSize == axi.config.dataWidth) return axi
+      val downsizer =
+        Axi4Downsizer(axi.config.copy(dataWidth = inputSize), axi.config)
+      downsizer.io.output >> axi
+      downsizer.io.input
+    }
+  }
+
+  implicit class Axi4ReadOnlyExt[T <: Data](axi: Axi4ReadOnly) {
+    def createDownsizerOnSlaveSide(inputSize: Int): Axi4ReadOnly = {
+      if (inputSize == axi.config.dataWidth) return axi
+      val downsizer = Axi4ReadOnlyDownsizer(
+        axi.config.copy(dataWidth = inputSize),
+        axi.config
+      )
+      downsizer.io.output >> axi
+      downsizer.io.input
+    }
+  }
+
+  implicit class Axi4WriteOnlyExt[T <: Data](axi: Axi4WriteOnly) {
+    def createDownsizerOnSlaveSide(inputSize: Int): Axi4WriteOnly = {
+      if (inputSize == axi.config.dataWidth) return axi
+      val downsizer = Axi4WriteOnlyDownsizer(
+        axi.config.copy(dataWidth = inputSize),
+        axi.config
+      )
+      downsizer.io.output >> axi
+      downsizer.io.input
     }
   }
 }

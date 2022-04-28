@@ -19,9 +19,9 @@ case class AluBranchContext(
   private val spec = Machine.get[MachineSpec]
   def parentObjects = Seq()
 
-  val pc = spec.dataType
+  val pc = Bits(spec.addrWidth)
   val predictedBranchValid = Bool()
-  val predictedBranchTarget = spec.dataType
+  val predictedBranchTarget = Bits(spec.addrWidth)
 }
 
 object AluOpcode extends SpinalEnum(binarySequential) {
@@ -121,6 +121,8 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
       out.incBrHit := False
       out.incBrMiss := False
 
+      val aPlusB = a + b
+
       val condLt = a.asSInt < b.asSInt
       val condLtu = a < b
       val condEq = a === b
@@ -154,7 +156,7 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
 
       switch(op.opcode) {
         is(AluOpcode.ADD) {
-          outValue := a + b
+          outValue := aPlusB
         }
         is(AluOpcode.SUB) {
           outValue := a - b
@@ -192,7 +194,7 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
         }
         if (brCtx.isDefined) {
           is(AluOpcode.ADD_TO_PC) {
-            outValue := pcAddConst
+            outValue := pcAddConst.resized
           }
           is(AluOpcode.LINK) {
             when(io_input.valid) {
@@ -201,7 +203,7 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
                 "LINK operation must be used with a valid branch"
               )
             }
-            outValue := linkValue
+            outValue := linkValue.resized
             out.incBrHit := True
           }
           is(AluOpcode.BRANCH) {
@@ -249,8 +251,8 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
                 "DYN_BRANCH must use a constant"
               )
             }
-            val target = (a + op.const.asUInt.resized).asBits
-            outValue := linkValue
+            val target = aPlusB.resize(spec.addrWidth).asBits
+            outValue := linkValue.resized
             when(
               !brCtx.get.predictedBranchValid || target =/= brCtx.get.predictedBranchTarget
             ) {

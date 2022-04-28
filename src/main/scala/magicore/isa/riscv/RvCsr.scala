@@ -35,17 +35,19 @@ object RvPrivLevel extends SpinalEnum {
 }
 
 case class RvCsrFile() extends Bundle {
+  private val spec = Machine.get[MachineSpec]
+
   val priv = RvPrivLevel()
 
   val mcycle = UInt(64 bits)
   val minstret = UInt(64 bits)
   val brMiss = UInt(64 bits)
   val brHit = UInt(64 bits)
-  val mscratch = UInt(32 bits)
-  val mepc = UInt(32 bits)
-  val mcause = UInt(32 bits)
-  val mtval = UInt(32 bits)
-  val mtvec = UInt(32 bits)
+  val mscratch = UInt(spec.dataWidth)
+  val mepc = UInt(spec.addrWidth)
+  val mcause = UInt(spec.dataWidth)
+  val mtval = UInt(spec.dataWidth)
+  val mtvec = UInt(spec.addrWidth)
   val mstatus = RvMstatus()
 }
 
@@ -160,6 +162,7 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
       hardType: HardType[_ <: PolymorphicDataChain]
   ): FunctionUnitInstance = {
     new FunctionUnitInstance {
+      private val mspec = Machine.get[MachineSpec]
       private val fspec = Machine.get[FrontendSpec]
       private val intrSvc = Machine.get[RvInterruptService]
 
@@ -185,40 +188,46 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
 
       intent.on(
         Seq(0xb00, 0xc00),
-        csr.csrFile.mcycle(31 downto 0).asBits
+        csr.csrFile.mcycle.asBits
       ) // cycle/mcycle
       intent.on(
         Seq(0xb02, 0xc02),
-        csr.csrFile.minstret(31 downto 0).asBits
+        csr.csrFile.minstret.asBits
       ) // instret/minstret
-      intent.on(
-        Seq(0xb80, 0xc80),
-        csr.csrFile.mcycle(63 downto 32).asBits
-      ) // cycleh/mcycleh
-      intent.on(
-        Seq(0xb82, 0xc82),
-        csr.csrFile.minstret(63 downto 32).asBits
-      ) // instreth/minstreth
 
+      if (mspec.dataWidth.value == 32) {
+        intent.on(
+          Seq(0xb80, 0xc80),
+          csr.csrFile.mcycle(63 downto 32).asBits
+        ) // cycleh/mcycleh
+        intent.on(
+          Seq(0xb82, 0xc82),
+          csr.csrFile.minstret(63 downto 32).asBits
+        ) // instreth/minstreth
+      }
       // brmiss
       intent.on(
         Seq(0xc03),
-        csr.csrFile.brMiss(31 downto 0).asBits
+        csr.csrFile.brMiss.asBits
       )
-      intent.on(
-        Seq(0xc83),
-        csr.csrFile.brMiss(63 downto 32).asBits
-      )
+      if (mspec.dataWidth.value == 32) {
+        intent.on(
+          Seq(0xc83),
+          csr.csrFile.brMiss.asBits
+        )
+      }
 
       // brhit
       intent.on(
         Seq(0xc04),
-        csr.csrFile.brHit(31 downto 0).asBits
+        csr.csrFile.brHit.asBits
       )
-      intent.on(
-        Seq(0xc84),
-        csr.csrFile.brHit(63 downto 32).asBits
-      )
+      if (mspec.dataWidth.value == 32) {
+        intent.on(
+          Seq(0xc84),
+          csr.csrFile.brHit(63 downto 32).asBits
+        )
+      }
 
       // mstatus
       intent.on(
@@ -227,17 +236,19 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
         x => csr.csrFile.mstatus.decodeFromBits_lower(x)
       )
 
-      // mstatush
-      intent.on(
-        Seq(0x310),
-        0
-      )
+      if (mspec.dataWidth.value == 32) {
+        // mstatush
+        intent.on(
+          Seq(0x310),
+          0
+        )
+      }
 
       // mtvec
       intent.on(
         Seq(0x305),
         csr.csrFile.mtvec.asBits,
-        x => csr.csrFile.mtvec := x.asUInt
+        x => csr.csrFile.mtvec := x.asUInt.resized
       )
 
       // mscratch
@@ -251,7 +262,7 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
       intent.on(
         Seq(0x341),
         csr.csrFile.mepc.asBits,
-        x => csr.csrFile.mepc := x.asUInt
+        x => csr.csrFile.mepc := x.asUInt.resized
       )
 
       // mcause
@@ -338,10 +349,10 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
           restartIt_reg := True
           restartPC_reg := excRestartPC
           csr.csrFile.mcause := (Bool(interrupt).asBits ## mcause.resize(
-            31 bits
+            csr.csrFile.mcause.getWidth - 1 bits
           )).asUInt
           csr.csrFile.mepc := fetch.pc
-          csr.csrFile.mtval := mtval
+          csr.csrFile.mtval := mtval.resized
           // 3.1.6.1
           // When a trap is taken from privilege mode y into privilege mode x,
           // x PIE is set to the value of x IE; x IE is set to 0; and x PP is set to y.

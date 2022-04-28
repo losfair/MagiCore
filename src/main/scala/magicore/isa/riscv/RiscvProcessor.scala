@@ -12,17 +12,20 @@ import spinal.lib.bus.amba4.axi._
 case class RiscvProcessor(
     resetPc: BigInt = 0x0,
     debug: Boolean = false,
-    initBranchPredictionBuffers: Boolean = false
+    initBranchPredictionBuffers: Boolean = false,
+    rv64: Boolean = false
 ) extends Area {
   object FuTag extends SpinalEnum(binarySequential) {
     val ALU, LSU, MUL, DIV, SLOW_ALU, EARLY_EXC, CSR = newElement()
   }
 
+  val dataWidth = if (rv64) 64 else 32
+
   val mspec = MachineSpec(
     numArchitecturalRegs = 32,
     numPhysicalRegs = 64,
     addrWidth = 32 bits,
-    dataWidth = 32 bits,
+    dataWidth = dataWidth bits,
     maxNumSrcRegsPerInsn = 2,
     maxNumDstRegsPerInsn = 1,
     issueQueueSize = 16,
@@ -33,7 +36,7 @@ case class RiscvProcessor(
 
   val fspec = FrontendSpec(
     icacheSize = 16384,
-    icacheMemPortDataWidth = 32,
+    icacheMemPortDataWidth = dataWidth,
     insnWidth = 32 bits,
     addrWidth = 32 bits,
     resetPc = resetPc,
@@ -55,7 +58,7 @@ case class RiscvProcessor(
 
   val msem = new MachineSemantics {
     lazy val functionUnits: Seq[FunctionUnit] = Seq(
-      new Alu(FuTag.ALU, AluConfig(alu32 = false)),
+      new Alu(FuTag.ALU, AluConfig(alu32 = rv64)),
       new Multiplier(FuTag.MUL, MultiplierConfig()),
       new Divider(FuTag.DIV, enableException = false),
       new SlowAlu(FuTag.SLOW_ALU),
@@ -95,7 +98,9 @@ case class RiscvProcessor(
         pipeline.io.writebackMonitor.size
       ) // out
 
-    val iBus = Axi4ReadOnly(fetch.io.memBus.config) // master
+    val iBus = Axi4ReadOnly(
+      fetch.io.memBus.config.copy(dataWidth = lsu.io_axiMaster.config.dataWidth)
+    ) // master
     val dBus = Axi4(lsu.io_axiMaster.config) // master
     val interrupt = RvInterruptLines() // in
   }
@@ -105,6 +110,13 @@ case class RiscvProcessor(
   pipeline.io.writebackMonitor
     .zip(io.writebackMonitor)
     .foreach(x => x._1 >> x._2)
-  fetch.io.memBus >> io.iBus
+  if (fetch.io.memBus.config.dataWidth != io.iBus.config.dataWidth) {
+    assert(fetch.io.memBus.config.dataWidth * 2 == io.iBus.config.dataWidth)
+    val upsizer = Axi4ReadOnlyUpsizer(fetch.io.memBus.config, io.iBus.config, 4)
+    fetch.io.memBus >> upsizer.io.input
+    upsizer.io.output >> io.iBus
+  } else {
+    fetch.io.memBus >> io.iBus
+  }
   lsu.io_axiMaster >> io.dBus
 }

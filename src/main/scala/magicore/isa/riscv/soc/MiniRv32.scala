@@ -19,29 +19,34 @@ import spinal.lib.misc.InterruptCtrl
 
 case class MiniRv32() extends Component {
   val debug = false
+  val rv64 = false
+  val dataWidth = if (rv64) 64 else 32
+
   val processor = RiscvProcessor(
     resetPc = 0x00010000,
     debug = debug,
-    initBranchPredictionBuffers = false
+    initBranchPredictionBuffers = false,
+    rv64 = rv64
   )
 
   val slaveIdWidth = 16
   val numExternalInterrupts = 16
   val numInternalInterrupts = 2
 
-  val bootromBackingStore = Mem(Bits(32 bits), 16384)
+  val bootromBackingStore =
+    if (rv64) Mem(Bits(64 bits), 2048) else Mem(Bits(32 bits), 4096)
   bootromBackingStore.initFromFile("./fsbl/firmware.bin")
   val bootromAxi = Axi4Rom(
     mem = bootromBackingStore,
     config = Axi4Config(
       addressWidth = 32,
-      dataWidth = 32,
+      dataWidth = dataWidth,
       idWidth = slaveIdWidth
     )
   )
 
   val ocram = Axi4SharedOnChipRam(
-    dataWidth = 32,
+    dataWidth = dataWidth,
     byteCount = 16384,
     idWidth = slaveIdWidth
   )
@@ -57,7 +62,8 @@ case class MiniRv32() extends Component {
     )
   )
 
-  val clint = new Axi4Clint(hartCount = 1, idWidth = slaveIdWidth)
+  val clint =
+    new Axi4Clint(hartCount = 1, idWidth = slaveIdWidth, dataWidth = dataWidth)
 
   val mas = new MicroarchSampler(
     sampleWidth = 32 bits,
@@ -79,7 +85,9 @@ case class MiniRv32() extends Component {
       port.fire
     )
   }
-  for ((port, i) <- processor.pipeline.inOrderIssue.io.issuePorts.zipWithIndex) {
+  for (
+    (port, i) <- processor.pipeline.inOrderIssue.io.issuePorts.zipWithIndex
+  ) {
     mas.addSignal(
       s"issue.ino.port_$i.fire",
       port.fire
@@ -111,14 +119,13 @@ case class MiniRv32() extends Component {
 
   val masCtrl =
     new Axi4MicroarchSamplerCtrl(sampler = mas, idWidth = slaveIdWidth)
-  val masDataAxi = mas.toAxi4ReadOnly(slaveIdWidth)
 
   val io = new Bundle {
     val bus = master(
       Axi4(
         Axi4Config(
           addressWidth = 32,
-          dataWidth = 32,
+          dataWidth = dataWidth,
           idWidth = slaveIdWidth
         )
       )
@@ -141,15 +148,23 @@ case class MiniRv32() extends Component {
   processor.io.interrupt.timer := clint.io.timerInterrupt(0)
   processor.io.interrupt.software := clint.io.softwareInterrupt(0)
 
+  val masCtrlAxi = masCtrl.io.bus.createDownsizerOnSlaveSide(dataWidth)
+  var masDataAxi =
+    mas.toAxi4ReadOnly(slaveIdWidth).createDownsizerOnSlaveSide(dataWidth)
+  val uartAxi = uart.io.axi.createDownsizerOnSlaveSide(dataWidth)
+  val clintAxi = clint.io.bus.createDownsizerOnSlaveSide(dataWidth)
+  val intrControllerAxi =
+    intrController.io.bus.createDownsizerOnSlaveSide(dataWidth)
+
   var axiCrossbar = Axi4CrossbarFactory()
   axiCrossbar.addSlaves(
     bootromAxi -> SizeMapping(0x00010000, bootromBackingStore.byteCount),
     ocram.io.axi -> SizeMapping(0x00020000, ocram.byteCount),
     io.bus -> SizeMapping(0x40000000, 2 GiB),
-    uart.io.axi -> SizeMapping(BigInt("ff010000", 16), 0x100),
-    masCtrl.io.bus -> SizeMapping(BigInt("ff010100", 16), 0x100),
-    intrController.io.bus -> SizeMapping(BigInt("ff010200", 16), 0x100),
-    clint.io.bus -> SizeMapping(BigInt("ff020000", 16), 0x10000),
+    uartAxi -> SizeMapping(BigInt("ff010000", 16), 0x100),
+    masCtrlAxi -> SizeMapping(BigInt("ff010100", 16), 0x100),
+    intrControllerAxi -> SizeMapping(BigInt("ff010200", 16), 0x100),
+    clintAxi -> SizeMapping(BigInt("ff020000", 16), 0x10000),
     masDataAxi -> SizeMapping(BigInt("ff100000", 16), mas.bufferSizeInBytes)
   )
   axiCrossbar.addConnections(
@@ -158,10 +173,10 @@ case class MiniRv32() extends Component {
       bootromAxi,
       ocram.io.axi,
       io.bus,
-      uart.io.axi,
-      clint.io.bus,
-      intrController.io.bus,
-      masCtrl.io.bus,
+      uartAxi,
+      clintAxi,
+      intrControllerAxi,
+      masCtrlAxi,
       masDataAxi
     )
   )

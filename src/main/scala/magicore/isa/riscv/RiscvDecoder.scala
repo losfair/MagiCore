@@ -20,6 +20,8 @@ import magicore.lib.funit.SlowAluOperation
 import magicore.lib.funit.SlowAluOpcode
 
 object ImmType extends SpinalEnum(binarySequential) {
+  private val mspec = Machine.get[MachineSpec]
+
   val X, I, H, S, B, J, U =
     newElement()
 
@@ -45,7 +47,7 @@ object ImmType extends SpinalEnum(binarySequential) {
         out.assignDontCare()
       }
     }
-    (replaceOperandBwithConst, out)
+    (replaceOperandBwithConst, out.resize(mspec.dataWidth))
   }
 }
 

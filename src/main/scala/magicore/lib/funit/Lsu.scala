@@ -14,7 +14,7 @@ case class LsuConfig(
 )
 
 object LsuOperationSize extends SpinalEnum(binarySequential) {
-  val BYTE, HALF, WORD = newElement()
+  val BYTE, HALF, WORD, DOUBLE = newElement()
 }
 
 case class LsuOperation() extends Bundle with PolymorphicDataChain {
@@ -23,7 +23,7 @@ case class LsuOperation() extends Bundle with PolymorphicDataChain {
 
   val isFence = Bool()
   val isStore = Bool()
-  val offset = SInt(32 bits)
+  val offset = SInt(spec.dataWidth)
   val size = LsuOperationSize()
   val signExt = Bool()
 }
@@ -39,13 +39,13 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
   private val spec = Machine.get[MachineSpec]
 
   val byteOffsetWidth = log2Up(spec.dataWidth.value / 8) bits
-  val storeBufferKeyWidth = (spec.dataWidth.value - byteOffsetWidth.value) bits
+  val storeBufferKeyWidth = (spec.addrWidth.value - byteOffsetWidth.value) bits
   val storeBufferKeyType = HardType(Bits(storeBufferKeyWidth))
   val strbWidth = (spec.dataWidth.value / 8) bits
   val strbType = HardType(Bits(strbWidth))
 
   def getStoreBufferKeyForAddr(addr: Bits): Bits = {
-    addr(spec.dataWidth.value - 1 downto byteOffsetWidth.value)
+    addr(spec.addrWidth.value - 1 downto byteOffsetWidth.value)
   }
 
   private var effInst: EffectInstance = null
@@ -53,7 +53,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
   override def inOrder: Boolean = true
 
   val axiConfig = Axi4Config(
-    addressWidth = spec.dataWidth.value,
+    addressWidth = spec.addrWidth.value,
     dataWidth = spec.dataWidth.value,
     idWidth = spec.robEntryIndexWidth.value + spec.epochWidth.value,
     useId = true,
@@ -73,12 +73,12 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
   assert(c.storeBufferSize <= spec.robSize)
 
   case class PendingStore() extends Bundle {
-    val addr = spec.dataType
+    val addr = Bits(spec.addrWidth)
     val strb = strbType()
   }
 
   case class OooLoadContext() extends Bundle {
-    val addr = spec.dataType
+    val addr = Bits(spec.addrWidth)
     val strb = strbType()
     val size = LsuOperationSize()
     val signExt = Bool()
@@ -105,7 +105,9 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
   }
 
   case class LsuReq() extends Bundle {
-    val addr = spec.dataType
+    assert(spec.dataWidth.value == 32 || spec.dataWidth.value == 64)
+
+    val addr = Bits(spec.addrWidth)
     val dataPhysRegIndex = spec.physRegIndexType
     val strb = Bits((spec.dataWidth.value / 8) bits)
     val isFence = Bool()
@@ -115,11 +117,20 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
     val signExt = Bool()
 
     def setStrbFromSize(size: SpinalEnumCraft[LsuOperationSize.type]): Unit = {
-      val baseStrb = size.mux(
-        LsuOperationSize.BYTE -> B(0x1, strb.getWidth bits),
-        LsuOperationSize.HALF -> B(0x3, strb.getWidth bits),
-        LsuOperationSize.WORD -> B(0xf, strb.getWidth bits)
-      )
+      val baseStrb =
+        if (spec.dataWidth.value == 32)
+          size.mux(
+            LsuOperationSize.BYTE -> B(0x1, strb.getWidth bits),
+            LsuOperationSize.HALF -> B(0x3, strb.getWidth bits),
+            default -> B(0xf, strb.getWidth bits)
+          )
+        else
+          size.mux(
+            LsuOperationSize.BYTE -> B(0x1, strb.getWidth bits),
+            LsuOperationSize.HALF -> B(0x3, strb.getWidth bits),
+            LsuOperationSize.WORD -> B(0xf, strb.getWidth bits),
+            default -> B(0xff, strb.getWidth bits)
+          )
       val shift = addr(byteOffsetWidth.value - 1 downto 0).asUInt
       strb := (baseStrb << shift).resized
     }
@@ -269,7 +280,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
 
       val storeBufferAllocLogic = new Area {
         val indexType = HardType(UInt(log2Up(storeBuffer.size) bits))
-        val addr = spec.dataType
+        val addr = Bits(spec.addrWidth)
         val firstMatch = storeBuffer.zipWithIndex.firstWhere(
           hardType = indexType(),
           predicate =
@@ -334,7 +345,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         val issue = in.lookup[IssuePort[_]]
 
         val req = LsuReq()
-        req.addr := (issue.srcRegData(0).asSInt + op.offset.resized).asBits
+        req.addr := (issue.srcRegData(0).resize(spec.addrWidth).asSInt + op.offset.resized).asBits
         req.dataPhysRegIndex := rename.physSrcRegs(1)
         req.isFence := op.isFence
         req.isStore := op.isStore

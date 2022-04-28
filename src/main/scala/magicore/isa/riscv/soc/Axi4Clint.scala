@@ -5,9 +5,9 @@ import spinal.lib._
 import spinal.lib.bus.amba4.axi._
 import spinal.lib.misc.Clint
 
-case class Axi4Clint(hartCount : Int, idWidth: Int) extends Component{
+case class Axi4Clint(hartCount : Int, idWidth: Int, dataWidth: Int) extends Component{
   val io = new Bundle {
-    val bus = slave(Axi4(Axi4Config(addressWidth = 16, dataWidth = 32, idWidth = idWidth)))
+    val bus = slave(Axi4(Axi4Config(addressWidth = 16, dataWidth = dataWidth, idWidth = idWidth)))
     val timerInterrupt = out Bits(hartCount bits)
     val softwareInterrupt = out Bits(hartCount bits)
     val time = out UInt(64 bits)

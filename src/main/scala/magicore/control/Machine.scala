@@ -109,7 +109,7 @@ case class MachineException() extends Bundle {
   private val spec = Machine.get[MachineSpec]
   val valid = Bool()
   val code = MachineExceptionCode()
-  val context2 = spec.dataType
+  val context2 = Bits(spec.addrWidth)
   val context3 = Bool()
   val context4 = Bool()
 
