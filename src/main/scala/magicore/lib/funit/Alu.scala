@@ -114,8 +114,19 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
           .asUInt
       })
 
-      val a = srcRegValues(0)
-      val b = op.replaceOperandBwithConst ? op.const.asUInt | srcRegValues(1)
+      def alu32Preprocess(x: UInt): UInt = {
+        if (c.alu32) {
+          op.alu32 ? x(31 downto 0).asSInt.resize(x.getWidth).asUInt | x
+        } else {
+          x
+        }
+      }
+
+      val a = alu32Preprocess(srcRegValues(0))
+      val b = op.replaceOperandBwithConst ? op.const.asUInt | alu32Preprocess(
+        srcRegValues(1)
+      )
+
       out.token := dispatchInfo.lookup[CommitToken]
       out.exception := MachineException.idle
       out.incBrHit := False
@@ -269,18 +280,7 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
         }
       }
 
-      if (c.alu32) {
-        when(op.alu32) {
-          // Sign extension
-          out.regWriteValue(0) := outValue(31 downto 0).asSInt
-            .resize(out.regWriteValue(0).getWidth)
-            .asBits
-        } otherwise {
-          out.regWriteValue(0) := outValue.asBits
-        }
-      } else {
-        out.regWriteValue(0) := outValue.asBits
-      }
+      out.regWriteValue(0) := alu32Preprocess(outValue).asBits
 
       // `valid := False` write and `prf.write` happen on the same cycle.
       when(io_output.fire) {

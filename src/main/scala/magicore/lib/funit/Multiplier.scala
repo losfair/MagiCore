@@ -6,12 +6,14 @@ import magicore.util.PolymorphicDataChain
 import magicore.control._
 
 case class MultiplierConfig(
+    mul32: Boolean = false
 )
 
-case class MultiplierOperation() extends Bundle {
+case class MultiplierOperation(enableMul32: Boolean) extends Bundle {
   val aSigned = Bool()
   val bSigned = Bool()
   val upperHalf = Bool()
+  val mul32 = if(enableMul32) Bool() else null
 }
 
 class Multiplier(staticTagData: => Data, c: MultiplierConfig)
@@ -37,7 +39,7 @@ class Multiplier(staticTagData: => Data, c: MultiplierConfig)
         val a = spec.dataType
         val b = spec.dataType
         val token = CommitToken()
-        val op = MultiplierOperation()
+        val op = MultiplierOperation(c.mul32)
       }
 
       val initialPayload = Payload()
@@ -50,7 +52,7 @@ class Multiplier(staticTagData: => Data, c: MultiplierConfig)
       case class Intermediate() extends Bundle {
         val value = SInt(((spec.dataWidth.value + 1) * 2) bits)
         val token = CommitToken()
-        val op = MultiplierOperation()
+        val op = MultiplierOperation(c.mul32)
       }
       val stage1Payload = Intermediate()
 
@@ -61,15 +63,22 @@ class Multiplier(staticTagData: => Data, c: MultiplierConfig)
       stage1Payload.value := aExt * bExt
       stage1Payload.token := stream.payload.token
       stage1Payload.op := stream.payload.op
-      val stage1 = stream.translateWith(stage1Payload).stage()
+      val stage1 = stream.translateWith(stage1Payload).stage().stage()
 
       out.token := stage1.payload.token
       out.exception := MachineException.idle
 
       val outValue = stage1.payload.value.asBits
-      out.regWriteValue(0) := stage1.payload.op.upperHalf ? outValue(
+      val result = stage1.payload.op.upperHalf ? outValue(
         spec.dataWidth.value * 2 - 1 downto spec.dataWidth.value
       ) | outValue(spec.dataWidth.value - 1 downto 0)
+      if (c.mul32) {
+        out.regWriteValue(0) := stage1.payload.op.mul32 ? result(
+          31 downto 0
+        ).asSInt.resize(spec.dataWidth).asBits | result
+      } else {
+        out.regWriteValue(0) := result
+      }
       io_output <-/< stage1.translateWith(out)
     }
   }

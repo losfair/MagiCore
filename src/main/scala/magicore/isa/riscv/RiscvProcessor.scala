@@ -59,8 +59,8 @@ case class RiscvProcessor(
   val msem = new MachineSemantics {
     lazy val functionUnits: Seq[FunctionUnit] = Seq(
       new Alu(FuTag.ALU, AluConfig(alu32 = rv64)),
-      new Multiplier(FuTag.MUL, MultiplierConfig()),
-      new Divider(FuTag.DIV, enableException = false),
+      new Multiplier(FuTag.MUL, MultiplierConfig(mul32 = rv64)),
+      new Divider(FuTag.DIV, div32 = rv64, enableException = false),
       new SlowAlu(FuTag.SLOW_ALU),
       new Lsu(FuTag.LSU, LsuConfig()),
       new EarlyExcPassthrough(FuTag.EARLY_EXC),

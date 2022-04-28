@@ -20,6 +20,7 @@ import spinal.lib.misc.InterruptCtrl
 case class MiniRv32() extends Component {
   val debug = false
   val rv64 = true
+  val downsizeExternalBus = true
   val dataWidth = if (rv64) 64 else 32
 
   val processor = RiscvProcessor(
@@ -125,7 +126,7 @@ case class MiniRv32() extends Component {
       Axi4(
         Axi4Config(
           addressWidth = 32,
-          dataWidth = dataWidth,
+          dataWidth = if (downsizeExternalBus) 32 else dataWidth,
           idWidth = slaveIdWidth
         )
       )
@@ -156,11 +157,18 @@ case class MiniRv32() extends Component {
   val intrControllerAxi =
     intrController.io.bus.createDownsizerOnSlaveSide(dataWidth)
 
+  val extBus = Axi4(io.bus.config.copy(dataWidth = dataWidth))
+  if (downsizeExternalBus) {
+    extBus >> io.bus.createDownsizerOnSlaveSide(dataWidth)
+  } else {
+    extBus >> io.bus
+  }
+
   var axiCrossbar = Axi4CrossbarFactory()
   axiCrossbar.addSlaves(
     bootromAxi -> SizeMapping(0x00010000, bootromBackingStore.byteCount),
     ocram.io.axi -> SizeMapping(0x00020000, ocram.byteCount),
-    io.bus -> SizeMapping(0x40000000, 2 GiB),
+    extBus -> SizeMapping(0x40000000, 2 GiB),
     uartAxi -> SizeMapping(BigInt("ff010000", 16), 0x100),
     masCtrlAxi -> SizeMapping(BigInt("ff010100", 16), 0x100),
     intrControllerAxi -> SizeMapping(BigInt("ff010200", 16), 0x100),
@@ -168,11 +176,11 @@ case class MiniRv32() extends Component {
     masDataAxi -> SizeMapping(BigInt("ff100000", 16), mas.bufferSizeInBytes)
   )
   axiCrossbar.addConnections(
-    processor.io.iBus -> Seq(bootromAxi, ocram.io.axi, io.bus),
+    processor.io.iBus -> Seq(bootromAxi, ocram.io.axi, extBus),
     processor.io.dBus -> Seq(
       bootromAxi,
       ocram.io.axi,
-      io.bus,
+      extBus,
       uartAxi,
       clintAxi,
       intrControllerAxi,

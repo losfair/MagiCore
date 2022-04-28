@@ -47,7 +47,7 @@ object ImmType extends SpinalEnum(binarySequential) {
         out.assignDontCare()
       }
     }
-    (replaceOperandBwithConst, out.resize(mspec.dataWidth))
+    (replaceOperandBwithConst, out.asSInt.resize(mspec.dataWidth).asBits)
   }
 }
 
@@ -122,7 +122,7 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
           6 downto 2
         )
       x.opcode := preOpcode.mux(
-        M"0000-100" -> replaceOperandBwithConst.mux(
+        M"0000-1-0" -> replaceOperandBwithConst.mux(
           True -> AluOpcode.ADD.craft(),
           False -> fetch
             .insn(30)
@@ -131,10 +131,10 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
               False -> AluOpcode.ADD.craft()
             )
         ),
-        M"0010-100" -> AluOpcode.SLL.craft(),
+        M"0010-1-0" -> AluOpcode.SLL.craft(),
         M"01-0-100" -> AluOpcode.CMP.craft(),
         M"1000-100" -> AluOpcode.XOR.craft(),
-        M"1010-100" -> fetch
+        M"1010-1-0" -> fetch
           .insn(30)
           .mux(
             True -> AluOpcode.SRA.craft(),
@@ -168,11 +168,13 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
       Some(x.asInstanceOf[T])
     } else if (ctag == classTag[DividerOperation]) {
       val x = DividerOperation()
+      x.div32 := fetch.insn(3)
       x.signed := !fetch.insn(12)
       x.useRemainder := fetch.insn(13)
       Some(x.asInstanceOf[T])
     } else if (ctag == classTag[MultiplierOperation]) {
-      val op = MultiplierOperation()
+      val op = MultiplierOperation(enableMul32 = true)
+      op.mul32 := fetch.insn(3)
       switch(fetch.insn(13 downto 12)) {
         is(B"00") {
           // MUL
@@ -414,12 +416,30 @@ case class RiscvDecoder(
       out.fuTag := mulPort
       out.immType := ImmType.X
     }
+    if (rv64) {
+      is(E.MULW) {
+        out.rdValid := True
+        out.rs1Valid := True
+        out.rs2Valid := True
+        out.fuTag := mulPort
+        out.immType := ImmType.X
+      }
+    }
     is(E.DIV, E.DIVU, E.REM, E.REMU) {
       out.rdValid := True
       out.rs1Valid := True
       out.rs2Valid := True
       out.fuTag := divPort
       out.immType := ImmType.X
+    }
+    if (rv64) {
+      is(E.DIVW, E.DIVUW, E.REMW, E.REMUW) {
+        out.rdValid := True
+        out.rs1Valid := True
+        out.rs2Valid := True
+        out.fuTag := divPort
+        out.immType := ImmType.X
+      }
     }
     is(E.FENCE) {
       val p_iorw = insn(27 downto 24)

@@ -160,6 +160,9 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         is(LsuOperationSize.HALF) {
           out := x(15 downto 0).asSInt.resize(x.getWidth bits).asBits
         }
+        is(LsuOperationSize.WORD) {
+          out := x(31 downto 0).asSInt.resize(x.getWidth bits).asBits
+        }
         default {
           out := x
         }
@@ -542,7 +545,11 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
                     " robIndex=",
                     req.payload.token.robIndex,
                     " epoch=",
-                    req.payload.token.epoch
+                    req.payload.token.epoch,
+                    " strb=",
+                    req.payload.strb,
+                    " size=",
+                    req.payload.size
                   )
                 )
               }
@@ -614,7 +621,9 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               " addr=",
               store.addr,
               ", data=",
-              w.data
+              w.data,
+              ", strb=",
+              w.strb
             )
           )
         }
@@ -663,7 +672,17 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               " robIndex=",
               commitReq.token.robIndex,
               " epoch=",
-              commitReq.token.epoch
+              commitReq.token.epoch,
+              " raw=",
+              axiM.r.payload.data,
+              " strb=",
+              ctx.strb,
+              " shift=",
+              ctx.shift,
+              " size=",
+              ctx.size,
+              " signExt=",
+              ctx.signExt
             )
           )
         }

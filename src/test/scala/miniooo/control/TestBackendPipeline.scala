@@ -122,7 +122,7 @@ class TestBackendPipeline extends AnyFunSuite {
         op.useRemainder := opc === GenericOpcode.REM_S || opc === GenericOpcode.REM_U
         Some(op.asInstanceOf[T])
       } else if (ctag == classTag[MultiplierOperation]) {
-        val op = MultiplierOperation()
+        val op = MultiplierOperation(false)
         op.aSigned := False
         op.bSigned := False
         op.upperHalf := False
