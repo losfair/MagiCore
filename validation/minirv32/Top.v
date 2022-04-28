@@ -10,8 +10,8 @@ module Top(
   output [7:0] dBus_awlen, // added
   output dBus_wvalid,
   input  dBus_wready,
-  output [31:0] dBus_wdata,
-  output [3:0] dBus_wstrb,
+  output [63:0] dBus_wdata,
+  output [7:0] dBus_wstrb,
   output dBus_wlast,
   input dBus_bvalid,
   output dBus_bready,
@@ -26,7 +26,7 @@ module Top(
   output [7:0] dBus_arlen, // added
   input dBus_rvalid,
   output dBus_rready,
-  input [31:0] dBus_rdata,
+  input [63:0] dBus_rdata,
   input [15:0] dBus_rid,
   input [1:0] dBus_rresp,
   input dBus_rlast,

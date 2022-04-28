@@ -20,7 +20,7 @@ import spinal.lib.misc.InterruptCtrl
 case class MiniRv32() extends Component {
   val debug = false
   val rv64 = true
-  val downsizeExternalBus = true
+  val downsizeExternalBus = false
   val dataWidth = if (rv64) 64 else 32
 
   val processor = RiscvProcessor(
