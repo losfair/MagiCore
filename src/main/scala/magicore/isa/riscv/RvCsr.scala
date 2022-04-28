@@ -213,7 +213,7 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
       if (mspec.dataWidth.value == 32) {
         intent.on(
           Seq(0xc83),
-          csr.csrFile.brMiss.asBits
+          csr.csrFile.brMiss(63 downto 32).asBits
         )
       }
 
