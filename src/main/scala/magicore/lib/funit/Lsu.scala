@@ -88,6 +88,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
 
   case class StoreBufferEntry() extends Bundle {
     val valid = Bool()
+    val posted = Bool()
     val key = storeBufferKeyType()
     val srcRobIndex = spec.robEntryIndexType()
   }
@@ -96,6 +97,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
     def idle: StoreBufferEntry = {
       val ret = StoreBufferEntry()
       ret.valid := False
+      ret.posted := False
       ret.key.assignDontCare()
       ret.srcRobIndex.assignDontCare()
       ret
@@ -240,7 +242,9 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
       // Validate storeBuffer invariants
       for ((entry, i) <- storeBuffer.zipWithIndex) {
         assert(
-          !entry.valid || pendingStoreValid(entry.srcRobIndex),
+          !entry.valid || (pendingStoreValid(
+            entry.srcRobIndex
+          ) && pendingStoreValid_posted(entry.srcRobIndex) === entry.posted),
           Seq(
             "store buffer invariant violation - rob index ",
             entry.srcRobIndex,
@@ -248,40 +252,40 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
             resetArea.pendingStoreValid_scheduled(entry.srcRobIndex),
             " psv.posted=",
             pendingStoreValid_posted(entry.srcRobIndex),
+            " entry.posted=",
+            entry.posted,
             " storeBufferIndex=" + i
           )
+        )
+      }
+      for ((psv, i) <- pendingStoreValid.zipWithIndex) {
+        assert(
+          !psv || storeBuffer.countForVerification(x =>
+            x.valid && x.srcRobIndex === i
+          ) === 1,
+          "psv entry maps to zero or multiple entries in store buffer"
         )
       }
 
       val storeBufferAllocLogic = new Area {
         val indexType = HardType(UInt(log2Up(storeBuffer.size) bits))
         val addr = spec.dataType
-        val allocOk = Bool()
-        val allocIndex = indexType()
-        allocIndex.assignDontCare()
-        val firstReplace = storeBuffer.zipWithIndex.firstWhere(
+        val firstMatch = storeBuffer.zipWithIndex.firstWhere(
           hardType = indexType(),
           predicate =
             x => x._1.valid && x._1.key === getStoreBufferKeyForAddr(addr),
-          generate = x => U(x._2, allocIndex.getWidth bits)
+          generate = x => U(x._2, indexType().getWidth bits)
         )
         val firstEmpty = storeBuffer.zipWithIndex.firstWhere(
           hardType = indexType(),
           predicate = x => x._1.valid === False,
-          generate = x => U(x._2, allocIndex.getWidth bits)
+          generate = x => U(x._2, indexType().getWidth bits)
         )
-
-        when(firstReplace._1) {
-          allocIndex := firstReplace._2
-        } elsewhen (firstEmpty._1) {
-          allocIndex := firstEmpty._2
-        }
-        allocOk := firstReplace._1 || firstEmpty._1
       }
 
       val pendingStoresUtil = new Area {
-        val srcRobIndexAtFirstReplace =
-          storeBuffer(storeBufferAllocLogic.firstReplace._2).srcRobIndex
+        val srcRobIndexAtFirstMatch =
+          storeBuffer(storeBufferAllocLogic.firstMatch._2).srcRobIndex
       }
 
       // This logic block may invalidate a `storeBuffer` entry. So, this logic needs to be
@@ -407,7 +411,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
             dataReq.token := req.payload.token
 
             val ok =
-              previousStoreCompleted && storeBufferAllocLogic.allocOk
+              previousStoreCompleted && storeBufferAllocLogic.firstEmpty._1
             outStream_pipeline.setIdle()
 
             storeDataWaitLogic.input.valid := ok
@@ -424,9 +428,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
                   " epoch=",
                   req.payload.token.epoch,
                   " previousStoreCompleted=",
-                  previousStoreCompleted,
-                  " allocOk=",
-                  storeBufferAllocLogic.allocOk
+                  previousStoreCompleted
                 )
               )
             }
@@ -440,17 +442,16 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               bufEntry.valid := True
               bufEntry.srcRobIndex := req.payload.token.robIndex
               bufEntry.key := getStoreBufferKeyForAddr(req.payload.addr)
+              bufEntry.posted := False
 
               assert(
                 !storeBuffer(
-                  storeBufferAllocLogic.allocIndex
-                ).valid || storeBuffer(
-                  storeBufferAllocLogic.allocIndex
-                ).key === getStoreBufferKeyForAddr(req.payload.addr),
+                  storeBufferAllocLogic.firstEmpty._2
+                ).valid,
                 "invalid allocated store buffer index"
               )
               storeBuffer(
-                storeBufferAllocLogic.allocIndex
+                storeBufferAllocLogic.firstEmpty._2
               ) := bufEntry
 
               // Write pending store - defer the actual write to effect handling
@@ -471,16 +472,16 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
             }
           } otherwise {
             // LOAD path
-            val found = storeBufferAllocLogic.firstReplace._1
+            val found = storeBufferAllocLogic.firstMatch._1
             assert(
               !found || storeBuffer(
-                storeBufferAllocLogic.firstReplace._2
+                storeBufferAllocLogic.firstMatch._2
               ).key === getStoreBufferKeyForAddr(req.payload.addr),
               "invalid store buffer index for load operation"
             )
             assert(
               !found || pendingStoreValid(
-                pendingStoresUtil.srcRobIndexAtFirstReplace
+                pendingStoresUtil.srcRobIndexAtFirstMatch
               ),
               "load operation got invalid src rob index"
             )
@@ -539,7 +540,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
           .map(x => x.valid)
           .orR
         effFifo.io.push.payload := effInst.io_effect
-        when(effFifo.io.push.fire) {
+        when(effFifo.io.push.valid) {
           for (eff <- effInst.io_effect) {
             when(eff.valid) {
               val scheduled = resetArea.pendingStoreValid_scheduled(
@@ -547,6 +548,14 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               )
               scheduled := False
               pendingStoreValid_posted(eff.payload.robIndex) := scheduled
+              for (entry <- storeBuffer) {
+                when(
+                  entry.valid && entry.srcRobIndex === eff.payload.robIndex && scheduled
+                ) {
+                  assert(!entry.posted, "posting a store buffer entry twice");
+                  entry.posted := True
+                }
+              }
             }
           }
         }
@@ -634,21 +643,15 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
       // Clear un-posted pending stores in the store buffer.
       when(effInst.io_reset) {
         for (entry <- storeBuffer) {
-          when(
-            !pendingStoreValid_posted(
-              entry.srcRobIndex
-            )
-          ) {
-            // Also invalidate the entry from the same cycle.
+          when(entry.valid && !entry.posted) {
             entry.valid := False
-            when(entry.valid) {
-              Machine.report(
-                Seq(
-                  "clearing un-posted pending store - rob index ",
-                  entry.srcRobIndex
-                )
+
+            Machine.report(
+              Seq(
+                "clearing un-posted pending store - rob index ",
+                entry.srcRobIndex
               )
-            }
+            )
           }
         }
       }
