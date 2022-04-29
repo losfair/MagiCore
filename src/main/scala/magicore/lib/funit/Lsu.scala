@@ -60,13 +60,13 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
     useRegion = false,
     useBurst = false,
     useLock = false,
-    useCache = false,
+    useCache = true,
     useSize = false,
     useQos = false,
     useLen = false,
     useLast = true,
     useResp = true,
-    useProt = false,
+    useProt = true,
     useStrb = true
   )
 
@@ -348,7 +348,10 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         val issue = in.lookup[IssuePort[_]]
 
         val req = LsuReq()
-        req.addr := (issue.srcRegData(0).resize(spec.addrWidth).asSInt + op.offset.resized).asBits
+        req.addr := (issue
+          .srcRegData(0)
+          .resize(spec.addrWidth)
+          .asSInt + op.offset.resized).asBits
         req.dataPhysRegIndex := rename.physSrcRegs(1)
         req.isFence := op.isFence
         req.isStore := op.isStore
@@ -520,6 +523,8 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               val ar = Axi4Ar(axiConfig)
               ar.id := (req.payload.token.epoch ## req.payload.token.robIndex).asUInt
               ar.addr := req.payload.addr.asUInt
+              ar.cache := B"1111"
+              ar.prot := B"000"
               axiM.ar.valid := True
               axiM.ar.payload := ar
               req.ready := axiM.ar.ready
@@ -565,39 +570,53 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
       val effectLogic = new Area {
         assert(!effFifo.io.push.isStall, "effect fifo must not stall")
 
-        effFifo.io.push.valid := effInst.io_effect
-          .map(x => x.valid)
-          .orR
-        effFifo.io.push.payload := effInst.io_effect
-        when(effFifo.io.push.valid) {
-          for (eff <- effInst.io_effect) {
-            when(eff.valid) {
-              val scheduled = resetArea.pendingStoreValid_scheduled(
-                eff.payload.robIndex
-              )
-              scheduled := False
-              pendingStoreValid_posted(eff.payload.robIndex) := scheduled
-              for (entry <- storeBuffer) {
-                when(
-                  entry.valid && entry.srcRobIndex === eff.payload.robIndex && scheduled
-                ) {
-                  assert(!entry.posted, "posting a store buffer entry twice");
-                  entry.posted := True
-                }
+        // XXX: Previously we incorrectly checked the `pendingStoreValid_scheduled` flag on the POP side instead of PUSH.
+        // This causes non-store LSU operations to also be pushed into the queue and fill it up above the allocated
+        // capacity (managed by `pendingStoreValid`), causing real store operations to be dropped.
+        //
+        // Unable to reproduce in simulation so far - TODO.
+        val effStoreScheduled = effInst.io_effect.map(x =>
+          resetArea.pendingStoreValid_scheduled(
+            x.payload.robIndex
+          )
+        )
+
+        effFifo.io.push.valid := False
+        for ((eff, i) <- effInst.io_effect.zipWithIndex) {
+          val storeScheduled = effStoreScheduled(i)
+          effFifo.io.push.payload(i).payload := eff.payload
+          when(eff.valid && storeScheduled) {
+            effFifo.io.push.valid := True
+            effFifo.io.push.payload(i).valid := True
+            storeScheduled := False
+            pendingStoreValid_posted(eff.payload.robIndex) := True
+            for (entry <- storeBuffer) {
+              when(
+                entry.valid && entry.srcRobIndex === eff.payload.robIndex
+              ) {
+                assert(!entry.posted, "posting a store buffer entry twice");
+                entry.posted := True
               }
             }
+          } otherwise {
+            effFifo.io.push.payload(i).valid := False
           }
         }
 
         val robIndex = effFifo.io.pop.payload.robIndex
-        val isStore = pendingStoreValid_posted(robIndex)
         val store = pendingStores(robIndex)
-        val popStream = effFifo.io.pop.throwWhen(!isStore)
+        val popStream = effFifo.io.pop
+        assert(
+          !popStream.valid || pendingStoreValid_posted(robIndex),
+          "popped effect was not posted"
+        )
         val (popToAw, popToW) = StreamFork2(popStream)
 
         val aw = Axi4Aw(axiConfig)
         aw.id := 0
         aw.addr := store.addr.asUInt
+        aw.cache := B"1111"
+        aw.prot := B"000"
         axiM.aw << popToAw.translateWith(aw)
 
         val w = Axi4W(axiConfig)
