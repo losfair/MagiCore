@@ -56,8 +56,8 @@ case class MiniRv32() extends Component {
     idWidth = slaveIdWidth,
     config = UartCtrlMemoryMappedConfig(
       baudrate = 115200,
-      txFifoDepth = 32,
-      rxFifoDepth = 32,
+      txFifoDepth = 128,
+      rxFifoDepth = 128,
       writeableConfig = true,
       clockDividerWidth = 20
     )
@@ -168,7 +168,7 @@ case class MiniRv32() extends Component {
   axiCrossbar.addSlaves(
     bootromAxi -> SizeMapping(0x00010000, bootromBackingStore.byteCount),
     ocram.io.axi -> SizeMapping(0x00020000, ocram.byteCount),
-    extBus -> SizeMapping(0x40000000, 2 GiB),
+    extBus -> SizeMapping(0x00100000, BigInt("c0000000", 16) - 0x00100000), // Zynq DDR + PL fabric range
     uartAxi -> SizeMapping(BigInt("ff010000", 16), 0x100),
     masCtrlAxi -> SizeMapping(BigInt("ff010100", 16), 0x100),
     intrControllerAxi -> SizeMapping(BigInt("ff010200", 16), 0x100),
@@ -244,7 +244,7 @@ object MiniRv32SyncReset {
   object SyncResetSpinalConfig
       extends SpinalConfig(
         defaultConfigForClockDomains = ClockDomainConfig(resetKind = SYNC),
-        defaultClockDomainFrequency = FixedFrequency(50 MHz)
+        defaultClockDomainFrequency = FixedFrequency(80 MHz)
       )
 
   def main(args: Array[String]) {

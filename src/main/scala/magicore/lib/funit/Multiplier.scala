@@ -63,7 +63,7 @@ class Multiplier(staticTagData: => Data, c: MultiplierConfig)
       stage1Payload.value := aExt * bExt
       stage1Payload.token := stream.payload.token
       stage1Payload.op := stream.payload.op
-      val stage1 = stream.translateWith(stage1Payload).stage().stage()
+      val stage1 = stream.translateWith(stage1Payload).stage()
 
       out.token := stage1.payload.token
       out.exception := MachineException.idle

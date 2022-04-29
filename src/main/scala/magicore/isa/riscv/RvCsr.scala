@@ -327,6 +327,12 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
         intrSvc.csrMie.decodeAndSet
       )
 
+      // mcounteren - TODO
+      intent.on(
+        Seq(0x306),
+        0
+      )
+
       // Exception handling
       val exceptionLogic = new Area {
         val restartIt_reg = Reg(Bool()) init (false)
