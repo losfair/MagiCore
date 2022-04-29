@@ -56,9 +56,9 @@ pub unsafe extern "C" fn rust_main() -> ! {
 
   // Jump to user program
   //riscv::register::mstatus::set_mpp(MPP::User);
-  riscv::register::mstatus::set_mpp(MPP::User);
-  riscv::register::mstatus::set_mpie();
-  riscv::register::mepc::write(0x80000000);
+  riscv::register::mstatus::set_mpp(MPP::Machine);
+  //riscv::register::mstatus::set_mpie();
+  riscv::register::mepc::write(0x60000000);
   asm!("mret");
   loop {}
 }
@@ -76,8 +76,8 @@ unsafe fn handle_ext_interrupt(_ctx: &mut IntrContext) {
     let count = io_read(MAS_BUFFER_PTR) as usize;
     writeln!(UartPort, "Starting MAS copy of {} samples.", count).unwrap();
     let start = riscv::register::cycle::read();
-    core::ptr::copy(MAS_DATA as *mut u64, 0x80800000 as *mut u64, count / 2);
-    //memcpy_u32(0x80800000 as *mut u32, MAS_DATA, count);
+    core::ptr::copy(MAS_DATA as *mut u64, 0x60800000 as *mut u64, count / 2);
+    //memcpy_u32(0x60800000 as *mut u32, MAS_DATA, count);
     let end = riscv::register::cycle::read();
     writeln!(
       UartPort,

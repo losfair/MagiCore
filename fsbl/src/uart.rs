@@ -9,7 +9,7 @@ const AUX_WRITE_PORT: *mut u32 = 0x43000000 as *mut u32;
 
 pub fn write_byte(x: u8) {
   unsafe {
-    while io_read(UART_RW_CAPACITY) == 0 {}
+    while (io_read(UART_RW_CAPACITY) >> 16) == 0 {}
     io_write(UART_RW_PORT, x as u32);
     io_write(AUX_WRITE_PORT, x as u32);
   }
