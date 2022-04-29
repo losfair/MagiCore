@@ -14,6 +14,7 @@ case class MultiLaneFifo[T <: Data](
   val io = new Bundle {
     val push = slave(Stream(Vec(Flow(dataType()), numLanes)))
     val pop = master(Stream(dataType()))
+    val occupancy = out UInt (log2Up(depth + 1) bit)
   }
   val backing =
     new StreamFifoLowLatency(
@@ -22,6 +23,7 @@ case class MultiLaneFifo[T <: Data](
       latency = 1
     )
   val currentLane = Reg(UInt(log2Up(numLanes) bits)) init (0)
+  io.occupancy := backing.io.occupancy
 
   assert(
     !io.push.valid || io.push.payload.map(x => x.valid).orR,

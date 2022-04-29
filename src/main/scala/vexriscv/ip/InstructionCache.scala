@@ -212,7 +212,7 @@ case class InstructionCacheMemBus(p : InstructionCacheConfig) extends Bundle wit
     mm.readCmd.valid := cmd.valid
     mm.readCmd.len := p.burstSize-1
     mm.readCmd.addr := cmd.address
-    mm.readCmd.prot  := "110"
+    mm.readCmd.prot  := "100"
     mm.readCmd.cache := "1111"
     mm.readCmd.setBurstINCR()
     cmd.ready := mm.readCmd.ready
