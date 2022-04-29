@@ -15,7 +15,7 @@ async def monitor_clk(dut):
 
 
 async def monitor_uart(dut):
-    duration = 1000000000 // 115200
+    duration = int((1000000000 / 115200) * (80 / 50))
     rx = dut.uart_txd
 
     # https://github.com/wallento/cocotbext-uart/blob/master/cocotbext/uart/base.py
@@ -59,6 +59,7 @@ class AxiDebugControllerRegion(Region):
         assert len(data) == 4
         value = struct.unpack("<I", data)[0]
         if address == 0:
+            #pass
             sys.stdout.write(chr(value))
             sys.stdout.flush()
         elif address == 4:
@@ -73,8 +74,9 @@ async def first_test(dut):
     addressSpace = AddressSpace(2 ** 32)
 
     dataMem = MemoryRegion(16777216)
-    addressSpace.register_region(dataMem, 0x80000000)
+    addressSpace.register_region(dataMem, 0x60000000)
 
+#   with open("/home/ubuntu/Projects/u-boot-magicore/u-boot-dtb.bin", "rb") as f:
     with open("/home/ubuntu/Projects/coremark-violet/firmware.bin", "rb") as f:
         await dataMem.write(0, f.read())
 
