@@ -8,9 +8,11 @@ import magicore.util.MultiLaneFifo
 import spinal.lib.bus.amba4.axi._
 import spinal.lib.fsm._
 import magicore.util.MagiCoreExt._
+import spinal.lib.bus.misc.SizeMapping
 
 case class LsuConfig(
-    storeBufferSize: Int = 16
+    storeBufferSize: Int = 16,
+    ioMemoryRegions: Seq[SizeMapping] = Seq()
 )
 
 object LsuOperationSize extends SpinalEnum(binarySequential) {
@@ -359,7 +361,21 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         req.signExt := op.signExt
         req.setStrbFromSize(op.size)
         req.token := in.lookup[CommitToken]
-        val out = io_input.translateWith(req).pipelined(m2s = true, s2m = true)
+
+        println("I/O memory regions: " + c.ioMemoryRegions)
+
+        val robHead = Machine.get[RobHeadInfo]
+        val isIoRegionLoad =
+          !req.isFence && !req.isStore &&
+            c.ioMemoryRegions.map(region => region.hit(req.addr.asUInt)).orR
+
+        // Exception condition already checked by InO-IQ
+        val out = io_input
+          .translateWith(req)
+          .continueWhen(
+            !isIoRegionLoad || req.token.robIndex === robHead.headPtr
+          )
+          .pipelined(m2s = true, s2m = true)
       }
 
       case class StoreDataWaitReq() extends Bundle {

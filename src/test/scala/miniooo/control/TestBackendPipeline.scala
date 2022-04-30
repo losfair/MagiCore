@@ -51,7 +51,14 @@ class TestBackendPipeline extends AnyFunSuite {
       new Multiplier(TestTag.static(1), MultiplierConfig()),
       new Divider(TestTag.static(2)),
       new DummyEffect(TestTag.static(3), false),
-      new Lsu(TestTag.static(4), LsuConfig()),
+      new Lsu(
+        TestTag.static(4),
+        LsuConfig(ioMemoryRegions =
+          Seq(
+            SizeMapping(ocmSize / 2, ocmSize / 2)
+          )
+        )
+      ),
       new EarlyExcPassthrough(TestTag.static(5)),
       new DummyEffect(TestTag.static(6), true)
     )
@@ -208,6 +215,14 @@ class TestBackendPipeline extends AnyFunSuite {
       idWidth = lsu.io_axiMaster.config.idWidth + 1
     )
 
+    val iomemReadCount = Reg(UInt(32 bits)) init (0)
+
+    when(
+      ocram.io.axi.arw.fire && !ocram.io.axi.arw.payload.write && ocram.io.axi.arw.payload.addr >= ocmSize / 2
+    ) {
+      iomemReadCount := iomemReadCount + 1
+    }
+
     val io = new Bundle {
       val input = slave(Stream(MockPayload()))
 
@@ -226,7 +241,11 @@ class TestBackendPipeline extends AnyFunSuite {
       val effectOutput = out(Vec(Flow(UInt(32 bits)), 2))
       val memBus = slave(Axi4Shared(lsu.io_axiMaster.config))
       val backendReset = out(Bool())
+
+      val iomemReadCount = out(UInt(32 bits))
     }
+
+    io.iomemReadCount := iomemReadCount
     io.input >> pipeline.io.input
     val prfIf = Machine.get[PrfInterface]
     io.regReadData := prfIf.readAsync(pipeline.rename.cmt(io.regReadAddr)).data
@@ -398,6 +417,7 @@ class TestBackendPipeline extends AnyFunSuite {
         var insnCount_excSnapshot = 0
         val expectedWritebackLog = ArrayBuffer[(Int, BigInt)]()
         val actualWritebackLog = ArrayBuffer[(Int, BigInt)]()
+        var expectedIomemReadCount = 0
 
         fork {
           while (true) {
@@ -690,6 +710,10 @@ class TestBackendPipeline extends AnyFunSuite {
               val mask = (addrMask >> 2) << 2
 
               val addr = mirror(rs1) & mask
+
+              if (!expectingException && addr >= ocmSize / 2) {
+                expectedIomemReadCount += 1
+              }
               val data = memMirror((addr / (mspec.dataWidth.value / 8)).toInt)
               mirror.update(rd, data)
               if (!expectingException) {
@@ -737,6 +761,10 @@ class TestBackendPipeline extends AnyFunSuite {
               val mask = addrMask
 
               val addr = mirror(rs1) & mask
+
+              if (!expectingException && addr >= ocmSize / 2) {
+                expectedIomemReadCount += 1
+              }
               val bitShift = (addr & ((mspec.dataWidth.value / 8) - 1)) * 8
               val data = (memMirror(
                 (addr / (mspec.dataWidth.value / 8)).toInt
@@ -787,6 +815,11 @@ class TestBackendPipeline extends AnyFunSuite {
               val mask = addrMask
 
               val addr = mirror(rs1) & mask
+
+              if (!expectingException && addr >= ocmSize / 2) {
+                expectedIomemReadCount += 1
+              }
+
               val bitShift = (addr & ((mspec.dataWidth.value / 8) - 1)) * 8
               val data_ = (memMirror(
                 (addr / (mspec.dataWidth.value / 8)).toInt
@@ -1051,6 +1084,15 @@ class TestBackendPipeline extends AnyFunSuite {
         }
 
         println("Total number of exceptions triggered: " + exceptionCount)
+
+        val actualIomemReadCount = dut.io.iomemReadCount.toBigInt
+        println(
+          s"Expected iomem read count: ${expectedIomemReadCount}, actual: ${actualIomemReadCount}"
+        )
+        assert(
+          expectedIomemReadCount == actualIomemReadCount,
+          "iomem read count mismatch"
+        )
 
         for (i <- 0 until mspec.numArchitecturalRegs) {
           dut.io.regReadAddr #= i

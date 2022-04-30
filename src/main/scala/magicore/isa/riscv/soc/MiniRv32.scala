@@ -27,7 +27,10 @@ case class MiniRv32() extends Component {
     resetPc = 0x00010000,
     debug = debug,
     initBranchPredictionBuffers = false,
-    rv64 = rv64
+    rv64 = rv64,
+    ioMemoryRegions = Seq(
+      SizeMapping(BigInt("ff000000", 16), 0x800000)
+    )
   )
 
   val slaveIdWidth = 16
@@ -168,7 +171,10 @@ case class MiniRv32() extends Component {
   axiCrossbar.addSlaves(
     bootromAxi -> SizeMapping(0x00010000, bootromBackingStore.byteCount),
     ocram.io.axi -> SizeMapping(0x00020000, ocram.byteCount),
-    extBus -> SizeMapping(0x00100000, BigInt("c0000000", 16) - 0x00100000), // Zynq DDR + PL fabric range
+    extBus -> SizeMapping(
+      0x00100000,
+      BigInt("c0000000", 16) - 0x00100000
+    ), // Zynq DDR + PL fabric range
     uartAxi -> SizeMapping(BigInt("ff010000", 16), 0x100),
     masCtrlAxi -> SizeMapping(BigInt("ff010100", 16), 0x100),
     intrControllerAxi -> SizeMapping(BigInt("ff010200", 16), 0x100),

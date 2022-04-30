@@ -8,12 +8,14 @@ import magicore.control._
 import magicore.frontend._
 import magicore.lib.funit._
 import spinal.lib.bus.amba4.axi._
+import spinal.lib.bus.misc.SizeMapping
 
 case class RiscvProcessor(
     resetPc: BigInt = 0x0,
     debug: Boolean = false,
     initBranchPredictionBuffers: Boolean = false,
-    rv64: Boolean = false
+    rv64: Boolean = false,
+    ioMemoryRegions: Seq[SizeMapping] = Seq()
 ) extends Area {
   object FuTag extends SpinalEnum(binarySequential) {
     val ALU, LSU, MUL, DIV, SLOW_ALU, EARLY_EXC, CSR = newElement()
@@ -62,7 +64,7 @@ case class RiscvProcessor(
       new Multiplier(FuTag.MUL, MultiplierConfig(mul32 = rv64)),
       new Divider(FuTag.DIV, div32 = rv64, enableException = false),
       new SlowAlu(FuTag.SLOW_ALU),
-      new Lsu(FuTag.LSU, LsuConfig()),
+      new Lsu(FuTag.LSU, LsuConfig(ioMemoryRegions = ioMemoryRegions)),
       new EarlyExcPassthrough(FuTag.EARLY_EXC),
       new RvCsr(FuTag.CSR)
     )
