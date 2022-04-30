@@ -179,7 +179,7 @@ case class MiniRv32() extends Component {
     masCtrlAxi -> SizeMapping(BigInt("ff010100", 16), 0x100),
     intrControllerAxi -> SizeMapping(BigInt("ff010200", 16), 0x100),
     clintAxi -> SizeMapping(BigInt("ff020000", 16), 0x10000),
-    masDataAxi -> SizeMapping(BigInt("ff100000", 16), mas.bufferSizeInBytes)
+    masDataAxi -> SizeMapping(BigInt("fe000000", 16), mas.bufferSizeInBytes)
   )
   axiCrossbar.addConnections(
     processor.io.iBus -> Seq(bootromAxi, ocram.io.axi, extBus),
