@@ -17,6 +17,15 @@ case class LsuConfig(
 
 object LsuOperationSize extends SpinalEnum(binarySequential) {
   val BYTE, HALF, WORD, DOUBLE = newElement()
+
+  def toAxSize(me: SpinalEnumCraft[LsuOperationSize.type]): UInt = {
+    me.mux(
+      BYTE -> B"000",
+      HALF -> B"001",
+      WORD -> B"010",
+      DOUBLE -> B"011"
+    ).asUInt
+  }
 }
 
 case class LsuOperation() extends Bundle with PolymorphicDataChain {
@@ -63,7 +72,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
     useBurst = false,
     useLock = false,
     useCache = true,
-    useSize = false,
+    useSize = true,
     useQos = false,
     useLen = false,
     useLast = true,
@@ -77,6 +86,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
   case class PendingStore() extends Bundle {
     val addr = Bits(spec.addrWidth)
     val strb = strbType()
+    val size = LsuOperationSize()
   }
 
   case class OooLoadContext() extends Bundle {
@@ -418,6 +428,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         val pendingStore = PendingStore()
         pendingStore.addr := req.payload.addr
         pendingStore.strb := req.payload.strb
+        pendingStore.size := req.payload.size
 
         val shouldWritePendingStore = False
         pendingStores.write(
@@ -541,6 +552,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               ar.addr := req.payload.addr.asUInt
               ar.cache := B"1111"
               ar.prot := B"000"
+              ar.size := LsuOperationSize.toAxSize(req.payload.size)
               axiM.ar.valid := True
               axiM.ar.payload := ar
               req.ready := axiM.ar.ready
@@ -632,6 +644,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         aw.id := 0
         aw.addr := store.addr.asUInt
         aw.cache := B"1111"
+        aw.size := LsuOperationSize.toAxSize(store.size)
         aw.prot := B"000"
         axiM.aw << popToAw.translateWith(aw)
 
