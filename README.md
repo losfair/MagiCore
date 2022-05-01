@@ -1,7 +1,16 @@
 # MagiCore
 
-ISA-independent SpinalHDL framework for building out-of-order processors.
-
-This is a work-in-progress.
+An out-of-order processor that supports multiple instruction sets. My playground for experimenting with new microarchitecture & ISA ideas.
 
 ![Architecture](res/arch.svg)
+
+## ISA support status
+
+- [x] RISC-V RV32IMU
+- [x] RISC-V RV64IMU
+- [ ] eBPF
+- [ ] MIPS
+
+## Performance
+
+Currently MagiCore's frontend (IFetch/Decode) is not superscalar so the performance is limited to <1 IPC. 2.27 CoreMark/MHz, ~106MHz on Artix 7.
