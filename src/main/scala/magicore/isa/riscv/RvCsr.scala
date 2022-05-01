@@ -25,6 +25,7 @@ object RvCsrFile {
     x.mtvec := 0
     x.mstatus.mpie := False
     x.mstatus.mpp := RvPrivLevel.M
+    x.custom_mcachedisable := True
     x
   }
 }
@@ -49,6 +50,8 @@ case class RvCsrFile() extends Bundle {
   val mtval = UInt(spec.dataWidth)
   val mtvec = UInt(spec.addrWidth)
   val mstatus = RvMstatus()
+
+  val custom_mcachedisable = Bool()
 }
 
 case class RvMstatus() extends Bundle {
@@ -90,6 +93,7 @@ case class RvCsrFileReg() extends Area {
     Machine.provide(
       AluPerfCounters(brMiss = csrFile.brMiss, brHit = csrFile.brHit)
     )
+    Machine.provide(LsuCacheControl(disabled = csrFile.custom_mcachedisable))
     Machine.provide(this)
   }
 }
@@ -331,6 +335,13 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
       intent.on(
         Seq(0x306),
         0
+      )
+
+      // mcachedisable
+      intent.on(
+        Seq(0x7c0),
+        csr.csrFile.custom_mcachedisable.asBits,
+        x => csr.csrFile.custom_mcachedisable := x(0)
       )
 
       // Exception handling
