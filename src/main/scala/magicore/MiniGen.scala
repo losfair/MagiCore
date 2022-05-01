@@ -99,6 +99,7 @@ class MiniGen extends Component {
         val op = LsuOperation()
         op.isStore := opc === GenericOpcode.ST
         op.isFence := False
+        op.isLrSc := False
         op.size := LsuOperationSize.WORD
         op.offset := const.asSInt
         op.signExt := False

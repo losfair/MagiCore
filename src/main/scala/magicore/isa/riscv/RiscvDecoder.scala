@@ -67,6 +67,15 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
 
   def parentObjects = Seq(fetch)
 
+  private def interpretAmoMemop(x: LsuOperation) {
+    x.isStore := fetch.insn(27)
+    x.isFence := False
+    x.isLrSc := True
+    x.offset := 0
+    x.size := fetch.insn(12) ? LsuOperationSize.DOUBLE | LsuOperationSize.WORD
+    x.signExt := True
+  }
+
   override def decodeAs[T <: AnyRef](ctag: ClassTag[T]): Option[T] = {
     val E = RvEncoding
 
@@ -152,19 +161,27 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
 
       Some(x.asInstanceOf[T])
     } else if (ctag == classTag[LsuOperation]) {
+      val opc = fetch.insn(6 downto 2)
       val x = LsuOperation()
-      x.isStore := fetch.insn(5)
-      x.isFence := fetch.insn(6 downto 2) === B"00011"
-      x.offset := ImmType.interpret(immType, fetch.insn)._2.asSInt
-      x.size := fetch
-        .insn(13 downto 12)
-        .mux(
-          B"00" -> LsuOperationSize.BYTE.craft(),
-          B"01" -> LsuOperationSize.HALF.craft(),
-          B"10" -> LsuOperationSize.WORD.craft(),
-          B"11" -> LsuOperationSize.DOUBLE.craft()
-        )
-      x.signExt := !fetch.insn(14)
+
+      when(opc === B"01011") {
+        // AMO
+        interpretAmoMemop(x)
+      } otherwise {
+        x.isStore := fetch.insn(5)
+        x.isFence := opc === B"00011"
+        x.isLrSc := False
+        x.offset := ImmType.interpret(immType, fetch.insn)._2.asSInt
+        x.size := fetch
+          .insn(13 downto 12)
+          .mux(
+            B"00" -> LsuOperationSize.BYTE.craft(),
+            B"01" -> LsuOperationSize.HALF.craft(),
+            B"10" -> LsuOperationSize.WORD.craft(),
+            B"11" -> LsuOperationSize.DOUBLE.craft()
+          )
+        x.signExt := !fetch.insn(14)
+      }
       Some(x.asInstanceOf[T])
     } else if (ctag == classTag[DividerOperation]) {
       val x = DividerOperation()
@@ -406,6 +423,36 @@ case class RiscvDecoder(
         out.rs2Valid := True
         out.fuTag := lsuPort
         out.immType := ImmType.S
+        out.isStore := True
+      }
+    }
+    is(E.LR_W) {
+      out.rdValid := True
+      out.rs1Valid := True
+      out.fuTag := lsuPort
+      out.immType := ImmType.X
+    }
+    is(E.SC_W) {
+      out.rdValid := True
+      out.rs1Valid := True
+      out.rs2Valid := True
+      out.fuTag := lsuPort
+      out.immType := ImmType.X
+      out.isStore := True
+    }
+    if (rv64) {
+      is(E.LR_D) {
+        out.rdValid := True
+        out.rs1Valid := True
+        out.fuTag := lsuPort
+        out.immType := ImmType.X
+      }
+      is(E.SC_D) {
+        out.rdValid := True
+        out.rs1Valid := True
+        out.rs2Valid := True
+        out.fuTag := lsuPort
+        out.immType := ImmType.X
         out.isStore := True
       }
     }

@@ -141,6 +141,7 @@ class TestBackendPipeline extends AnyFunSuite {
       } else if (ctag == classTag[LsuOperation]) {
         val op = LsuOperation()
         op.isFence := opc === GenericOpcode.MFENCE
+        op.isLrSc := False
         op.isStore := opc === GenericOpcode.ST_B || opc === GenericOpcode.ST_H || opc === GenericOpcode.ST_W
         op.size := opc.mux(
           GenericOpcode.ST_B -> LsuOperationSize.BYTE.craft(),

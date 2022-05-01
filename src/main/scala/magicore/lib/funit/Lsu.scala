@@ -34,6 +34,7 @@ case class LsuOperation() extends Bundle with PolymorphicDataChain {
 
   val isFence = Bool()
   val isStore = Bool()
+  val isLrSc = Bool()
   val offset = SInt(spec.dataWidth)
   val size = LsuOperationSize()
   val signExt = Bool()
@@ -130,6 +131,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
     val size = LsuOperationSize()
     val signExt = Bool()
     val noCache = Bool()
+    val isLrSc = Bool()
 
     def setStrbFromSize(size: SpinalEnumCraft[LsuOperationSize.type]): Unit = {
       val baseStrb =
@@ -239,6 +241,8 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         new ResetArea(reset = effInst.io_reset, cumulative = true) {
           val pendingStoreValid_scheduled =
             Vec(Reg(Bool()) init (false), spec.robSize)
+
+          val lr = Reg(Bool()) init (false)
         }
       val storeBuffer = Vec(
         Reg(StoreBufferEntry()) init (StoreBufferEntry.idle),
@@ -374,6 +378,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         req.signExt := op.signExt
         req.setStrbFromSize(op.size)
         req.token := in.lookup[CommitToken]
+        req.isLrSc := op.isLrSc
 
         val iomem = !req.isFence && c.ioMemoryRegions
           .map(region => region.hit(req.addr.asUInt))
@@ -391,18 +396,18 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
 
         val robHead = Machine.get[RobHeadInfo]
 
-        // I/O memory semantics:
-        // - For loads, we wait until the instruction is guaranteed to be retired. This makes sure that I/O
-        // memory will not be speculatively loaded and produce side effects.
-        // - For stores, no request is sent to I/O memory until retire - but we currently require a `fence w, rw`
-        // to guarantee store-to-load ordering/effect visibility at different addresses. XXX: Should we change this?
         val isIoRegionLoad = iomem && !req.isStore
+
+        // Wait until we reached the ROB head & store buffer is empty if:
+        // - This is an I/O region load.
+        // - This is an LR/SC operation.
+        val blockIt = isIoRegionLoad || op.isLrSc
 
         // Exception condition already checked by InO-IQ
         val out = io_input
           .translateWith(req)
           .continueWhen(
-            !isIoRegionLoad || req.token.robIndex === robHead.headPtr
+            !blockIt || (req.token.robIndex === robHead.headPtr && !busy.busy)
           )
           .pipelined(m2s = true, s2m = true)
       }
@@ -423,7 +428,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
 
         val commitReq = CommitRequest(null)
         commitReq.exception := MachineException.idle
-        commitReq.regWriteValue.assignDontCare()
+        commitReq.regWriteValue(0) := 0
         commitReq.token := req.payload.token
 
         val epochMismatch = req.payload.token.epoch =/= epochMgr.currentEpoch
@@ -475,75 +480,88 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
             outStream_pipeline.payload := commitReq
           } elsewhen (req.payload.isStore) {
             // STORE path
-            // Wait for the previous store to complete
-            val previousStoreCompleted = !pendingStoreValid(
-              req.payload.token.robIndex
-            )
 
-            val dataReq = StoreDataWaitReq()
-            dataReq.dataPhysReg := req.payload.dataPhysRegIndex
-            dataReq.shift := req.payload.addr.resize(byteOffsetWidth).asUInt
-            dataReq.token := req.payload.token
+            val scFailure = req.payload.isLrSc && !resetArea.lr
+            when(scFailure) {
+              val commitReq = CommitRequest(null)
+              commitReq.exception := MachineException.idle
+              commitReq.regWriteValue(0) := 1
+              commitReq.token := req.payload.token
+              outStream_pipeline << req.translateWith(commitReq)
+            } otherwise {
 
-            val ok =
-              previousStoreCompleted && storeBufferAllocLogic.firstEmpty._1
-            outStream_pipeline.setIdle()
-
-            storeDataWaitLogic.input.valid := ok
-            storeDataWaitLogic.input.payload := dataReq
-            req.ready := ok && storeDataWaitLogic.input.ready
-
-            when(req.isStall) {
-              Machine.report(
-                Seq(
-                  "store STALL - addr=",
-                  req.payload.addr.asUInt,
-                  " robIndex=",
-                  req.payload.token.robIndex,
-                  " epoch=",
-                  req.payload.token.epoch,
-                  " previousStoreCompleted=",
-                  previousStoreCompleted
-                )
-              )
-            }
-
-            // Throw away outdated requests
-            when(
-              req.ready && req.payload.token.epoch === epochMgr.currentEpoch
-            ) {
-              // Write to store buffer
-              val bufEntry = StoreBufferEntry()
-              bufEntry.valid := True
-              bufEntry.srcRobIndex := req.payload.token.robIndex
-              bufEntry.key := getStoreBufferKeyForAddr(req.payload.addr)
-              bufEntry.posted := False
-
-              assert(
-                !storeBuffer(
-                  storeBufferAllocLogic.firstEmpty._2
-                ).valid,
-                "invalid allocated store buffer index"
-              )
-              storeBuffer(
-                storeBufferAllocLogic.firstEmpty._2
-              ) := bufEntry
-
-              // Write pending store - defer the actual write to effect handling
-              resetArea.pendingStoreValid_scheduled(
+              // Wait for the previous store to complete
+              val previousStoreCompleted = !pendingStoreValid(
                 req.payload.token.robIndex
-              ) := True
-              shouldWritePendingStore := True
-              Machine.report(
-                Seq(
-                  "store scheduled - addr=",
-                  req.payload.addr.asUInt,
-                  " robIndex=",
-                  req.payload.token.robIndex,
-                  " epoch=",
-                  req.payload.token.epoch
-                )
               )
+
+              val dataReq = StoreDataWaitReq()
+              dataReq.dataPhysReg := req.payload.dataPhysRegIndex
+              dataReq.shift := req.payload.addr.resize(byteOffsetWidth).asUInt
+              dataReq.token := req.payload.token
+
+              val ok =
+                previousStoreCompleted && storeBufferAllocLogic.firstEmpty._1
+              outStream_pipeline.setIdle()
+
+              storeDataWaitLogic.input.valid := ok
+              storeDataWaitLogic.input.payload := dataReq
+              req.ready := ok && storeDataWaitLogic.input.ready
+
+              when(req.isStall) {
+                Machine.report(
+                  Seq(
+                    "store STALL - addr=",
+                    req.payload.addr.asUInt,
+                    " robIndex=",
+                    req.payload.token.robIndex,
+                    " epoch=",
+                    req.payload.token.epoch,
+                    " previousStoreCompleted=",
+                    previousStoreCompleted
+                  )
+                )
+              }
+
+              // Throw away outdated requests
+              when(
+                req.ready && req.payload.token.epoch === epochMgr.currentEpoch
+              ) {
+                resetArea.lr clearWhen (req.payload.isLrSc)
+                // Write to store buffer
+                val bufEntry = StoreBufferEntry()
+                bufEntry.valid := True
+                bufEntry.srcRobIndex := req.payload.token.robIndex
+                bufEntry.key := getStoreBufferKeyForAddr(req.payload.addr)
+                bufEntry.posted := False
+
+                assert(
+                  !storeBuffer(
+                    storeBufferAllocLogic.firstEmpty._2
+                  ).valid,
+                  "invalid allocated store buffer index"
+                )
+                storeBuffer(
+                  storeBufferAllocLogic.firstEmpty._2
+                ) := bufEntry
+
+                // Write pending store - defer the actual write to effect handling
+                resetArea.pendingStoreValid_scheduled(
+                  req.payload.token.robIndex
+                ) := True
+                shouldWritePendingStore := True
+                Machine.report(
+                  Seq(
+                    "store scheduled - addr=",
+                    req.payload.addr.asUInt,
+                    " robIndex=",
+                    req.payload.token.robIndex,
+                    " epoch=",
+                    req.payload.token.epoch
+                  )
+                )
+
+              }
             }
           } otherwise {
             // LOAD path
@@ -589,6 +607,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               )
 
               when(req.ready) {
+                resetArea.lr setWhen (req.payload.isLrSc)
                 Machine.report(
                   Seq(
                     "issueing ooo load at addr ",
@@ -602,7 +621,9 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
                     " strb=",
                     req.payload.strb,
                     " size=",
-                    req.payload.size
+                    req.payload.size,
+                    " lr=",
+                    req.payload.isLrSc
                   )
                 )
               }
