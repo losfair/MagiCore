@@ -44,6 +44,7 @@ trait LsuInstance extends FunctionUnitInstance {
 }
 
 case class LsuBusySignal(busy: Bool)
+case class LsuCacheControl(disabled: Bool)
 
 class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
   def staticTag: Data = staticTagData
@@ -87,6 +88,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
     val addr = Bits(spec.addrWidth)
     val strb = strbType()
     val size = LsuOperationSize()
+    val noCache = Bool()
   }
 
   case class OooLoadContext() extends Bundle {
@@ -127,6 +129,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
     val token = CommitToken()
     val size = LsuOperationSize()
     val signExt = Bool()
+    val noCache = Bool()
 
     def setStrbFromSize(size: SpinalEnumCraft[LsuOperationSize.type]): Unit = {
       val baseStrb =
@@ -372,12 +375,28 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         req.setStrbFromSize(op.size)
         req.token := in.lookup[CommitToken]
 
+        val iomem = !req.isFence && c.ioMemoryRegions
+          .map(region => region.hit(req.addr.asUInt))
+          .orR
+
+        val cacheControl = Machine.tryGet[LsuCacheControl]
+        if (cacheControl.isDefined) {
+          println("LSU cache control enabled.")
+          req.noCache := iomem || cacheControl.get.disabled
+        } else {
+          req.noCache := iomem
+        }
+
         println("I/O memory regions: " + c.ioMemoryRegions)
 
         val robHead = Machine.get[RobHeadInfo]
-        val isIoRegionLoad =
-          !req.isFence && !req.isStore &&
-            c.ioMemoryRegions.map(region => region.hit(req.addr.asUInt)).orR
+
+        // I/O memory semantics:
+        // - For loads, we wait until the instruction is guaranteed to be retired. This makes sure that I/O
+        // memory will not be speculatively loaded and produce side effects.
+        // - For stores, no request is sent to I/O memory until retire - but we currently require a `fence w, rw`
+        // to guarantee store-to-load ordering/effect visibility at different addresses. XXX: Should we change this?
+        val isIoRegionLoad = iomem && !req.isStore
 
         // Exception condition already checked by InO-IQ
         val out = io_input
@@ -429,6 +448,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         pendingStore.addr := req.payload.addr
         pendingStore.strb := req.payload.strb
         pendingStore.size := req.payload.size
+        pendingStore.noCache := req.payload.noCache
 
         val shouldWritePendingStore = False
         pendingStores.write(
@@ -550,7 +570,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               val ar = Axi4Ar(axiConfig)
               ar.id := (req.payload.token.epoch ## req.payload.token.robIndex).asUInt
               ar.addr := req.payload.addr.asUInt
-              ar.cache := B"1111"
+              ar.cache := req.payload.noCache ? B"0000" | B"1111"
               ar.prot := B"000"
               ar.size := LsuOperationSize.toAxSize(req.payload.size)
               axiM.ar.valid := True
@@ -643,7 +663,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         val aw = Axi4Aw(axiConfig)
         aw.id := 0
         aw.addr := store.addr.asUInt
-        aw.cache := B"1111"
+        aw.cache := store.noCache ? B"0000" | B"1111"
         aw.size := LsuOperationSize.toAxSize(store.size)
         aw.prot := B"000"
         axiM.aw << popToAw.translateWith(aw)

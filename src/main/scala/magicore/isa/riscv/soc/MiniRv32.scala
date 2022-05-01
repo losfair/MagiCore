@@ -29,7 +29,8 @@ case class MiniRv32() extends Component {
     initBranchPredictionBuffers = false,
     rv64 = rv64,
     ioMemoryRegions = Seq(
-      SizeMapping(BigInt("ff000000", 16), 0x800000)
+      SizeMapping(BigInt("ff000000", 16), 0x800000), // Internal I/O
+      SizeMapping(BigInt("40000000", 16), 0x10000000) // AXI I/O devices
     )
   )
 
