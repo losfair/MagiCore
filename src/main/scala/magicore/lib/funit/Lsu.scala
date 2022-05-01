@@ -396,18 +396,24 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
 
         val robHead = Machine.get[RobHeadInfo]
 
+        // Fences:
+        //
+        // - For stores, no request is sent to I/O memory until retire - but we currently require a `fence w, rw`
+        // to guarantee store-to-load ordering/effect visibility at different addresses. XXX: Should we change this?
         val isIoRegionLoad = iomem && !req.isStore
 
-        // Wait until we reached the ROB head & store buffer is empty if:
+        // Wait until we reached the ROB head if:
         // - This is an I/O region load.
         // - This is an LR/SC operation.
+        //
+        // Checking `busy` is invalid here due to pipelining.
         val blockIt = isIoRegionLoad || op.isLrSc
 
         // Exception condition already checked by InO-IQ
         val out = io_input
           .translateWith(req)
           .continueWhen(
-            !blockIt || (req.token.robIndex === robHead.headPtr && !busy.busy)
+            !blockIt || req.token.robIndex === robHead.headPtr
           )
           .pipelined(m2s = true, s2m = true)
       }
