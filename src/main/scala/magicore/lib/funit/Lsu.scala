@@ -136,6 +136,15 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
     val noCache = Bool()
     val isLrSc = Bool()
 
+    def isAligned: Bool = {
+      size.mux(
+        LsuOperationSize.BYTE -> True,
+        LsuOperationSize.HALF -> (addr(0 downto 0) === 0),
+        LsuOperationSize.WORD -> (addr(1 downto 0) === 0),
+        LsuOperationSize.DOUBLE -> (addr(2 downto 0) === 0)
+      )
+    }
+
     def setStrbFromSize(size: SpinalEnumCraft[LsuOperationSize.type]): Unit = {
       val baseStrb =
         if (spec.dataWidth.value == 32)
@@ -493,6 +502,17 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
             req.ready := ok && outStream_pipeline.ready
             outStream_pipeline.valid := ok
             outStream_pipeline.payload := commitReq
+          } elsewhen (!req.payload.isAligned) {
+            val commitReq = CommitRequest(null)
+            commitReq.regWriteValue(0).assignDontCare()
+            commitReq.token := req.payload.token
+
+            commitReq.exception.assignDontCare()
+            commitReq.exception.valid := True
+            commitReq.exception.code := req.payload.isStore ? MachineExceptionCode.STORE_ALIGNMENT_ERROR | MachineExceptionCode.LOAD_ALIGNMENT_ERROR
+            commitReq.exception.memoryError_accessAddr := req.payload.addr
+
+            outStream_pipeline << req.translateWith(commitReq)
           } elsewhen (req.payload.isStore) {
             // STORE path
 

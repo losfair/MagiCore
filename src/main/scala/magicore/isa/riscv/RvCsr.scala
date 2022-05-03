@@ -295,6 +295,7 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
       misa(20) := True // U
       misa(12) := True // M
       misa(8) := True // I
+      misa(0) := True // A
       intent.on(
         Seq(0x301),
         misa
@@ -407,6 +408,14 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
             is(MachineExceptionCode.MEMORY_ERROR) {
               // Load access fault
               restartIntoException(5, exc.memoryError_accessAddr.asUInt)
+            }
+            is(MachineExceptionCode.LOAD_ALIGNMENT_ERROR) {
+              // Load address misaligned
+              restartIntoException(4, exc.memoryError_accessAddr.asUInt)
+            }
+            is(MachineExceptionCode.STORE_ALIGNMENT_ERROR) {
+              // Store address misaligned
+              restartIntoException(6, exc.memoryError_accessAddr.asUInt)
             }
             is(MachineExceptionCode.EXT_INTERRUPT) {
               // External interrupt.
