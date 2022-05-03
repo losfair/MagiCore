@@ -466,6 +466,9 @@ case class FetchUnit() extends Area {
         Machine.report(Seq("Requested ICache flush."))
         pcStreamGen.pc.pc := nextPCforTheirFetchPacket
         icache.io.flush := True
+      } elsewhen(exc.exc.code === MachineExceptionCode.RETRY) {
+        Machine.report(Seq("Requested retry."))
+        pcStreamGen.pc.pc := theirFetchPacket.pc
       } otherwise {
         Machine.report(Seq("Got exception - IFetch lockup."))
         pcStreamGen.valid := False

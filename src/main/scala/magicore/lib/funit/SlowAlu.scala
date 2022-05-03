@@ -6,7 +6,7 @@ import magicore.util.PolymorphicDataChain
 import magicore.control._
 
 object SlowAluOpcode extends SpinalEnum(binarySequential) {
-  val CLZ, CTZ =
+  val CLZ, CTZ, MAX_S, MAX_U, MIN_S, MIN_U =
     newElement()
 }
 
@@ -54,16 +54,16 @@ class SlowAlu(staticTagData: => Data) extends FunctionUnit {
         val input = Stream(ClzReq())
         input.setIdle()
 
+        val staged = input.stage()
+
         val output = Stream(CommitRequest(null))
 
         val out = CommitRequest(null)
         out.exception := MachineException.idle
-        out.regWriteValue(0) := LeadingZeros(input.value).asBits.resized
-        out.token := input.token
-        output << input.translateWith(out)
+        out.regWriteValue(0) := LeadingZeros(staged.value).asBits.resized
+        out.token := staged.token
+        output << staged.translateWith(out)
       }
-
-      clzPipeline.output >/-> io_output
 
       val triggerLogic = new Area {
         val bufferedInput = io_input.stage()
@@ -72,6 +72,9 @@ class SlowAlu(staticTagData: => Data) extends FunctionUnit {
         val op = bufferedInput.payload.lookup[SlowAluOperation]
         val token = bufferedInput.payload.lookup[CommitToken]
         val issue = bufferedInput.payload.lookup[IssuePort[_]]
+
+        val output = Stream(CommitRequest(null))
+        output.setIdle()
 
         when(bufferedInput.valid) {
           switch(op.opcode) {
@@ -87,9 +90,57 @@ class SlowAlu(staticTagData: => Data) extends FunctionUnit {
               ctzPayload.value := issue.srcRegData(0).reversed
               clzPipeline.input << bufferedInput.translateWith(ctzPayload)
             }
+            is(SlowAluOpcode.MAX_S) {
+              val commit = CommitRequest(null)
+              commit.exception := MachineException.idle
+              commit.token := token
+              when(issue.srcRegData(0).asSInt > issue.srcRegData(1).asSInt) {
+                commit.regWriteValue(0) := issue.srcRegData(0)
+              } otherwise {
+                commit.regWriteValue(0) := issue.srcRegData(1)
+              }
+              output << bufferedInput.translateWith(commit)
+            }
+            is(SlowAluOpcode.MAX_U) {
+              val commit = CommitRequest(null)
+              commit.exception := MachineException.idle
+              commit.token := token
+              when(issue.srcRegData(0).asUInt > issue.srcRegData(1).asUInt) {
+                commit.regWriteValue(0) := issue.srcRegData(0)
+              } otherwise {
+                commit.regWriteValue(0) := issue.srcRegData(1)
+              }
+              output << bufferedInput.translateWith(commit)
+            }
+            is(SlowAluOpcode.MIN_S) {
+              val commit = CommitRequest(null)
+              commit.exception := MachineException.idle
+              commit.token := token
+              when(issue.srcRegData(0).asSInt < issue.srcRegData(1).asSInt) {
+                commit.regWriteValue(0) := issue.srcRegData(0)
+              } otherwise {
+                commit.regWriteValue(0) := issue.srcRegData(1)
+              }
+              output << bufferedInput.translateWith(commit)
+            }
+            is(SlowAluOpcode.MIN_U) {
+              val commit = CommitRequest(null)
+              commit.exception := MachineException.idle
+              commit.token := token
+              when(issue.srcRegData(0).asUInt < issue.srcRegData(1).asUInt) {
+                commit.regWriteValue(0) := issue.srcRegData(0)
+              } otherwise {
+                commit.regWriteValue(0) := issue.srcRegData(1)
+              }
+              output << bufferedInput.translateWith(commit)
+            }
           }
         }
       }
+
+      StreamArbiterFactory.lowerFirst.on(
+        Seq(clzPipeline.output, triggerLogic.output)
+      ) >/-> io_output
     }
   }
 }

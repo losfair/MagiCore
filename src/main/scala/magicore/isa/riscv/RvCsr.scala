@@ -26,6 +26,7 @@ object RvCsrFile {
     x.mstatus.mpie := False
     x.mstatus.mpp := RvPrivLevel.M
     x.custom_mcachedisable := True
+    x.internal_scratch0 := 0
     x
   }
 }
@@ -52,6 +53,7 @@ case class RvCsrFile() extends Bundle {
   val mstatus = RvMstatus()
 
   val custom_mcachedisable = Bool()
+  val internal_scratch0 = UInt(spec.dataWidth)
 }
 
 case class RvMstatus() extends Bundle {
@@ -103,6 +105,7 @@ case class RvCsrFileIntent(data: Stream[_ <: PolymorphicDataChain])
   private val mspec = Machine.get[MachineSpec]
 
   val fetch = data.payload.lookup[FetchPacket]
+  val decode = data.payload.lookup[DecodeInfo]
   val issue = data.payload.lookup[IssuePort[_]]
 
   val useConst = fetch.insn(14)
@@ -122,9 +125,12 @@ case class RvCsrFileIntent(data: Stream[_ <: PolymorphicDataChain])
       csr: Seq[Bits],
       value: Bits,
       write: (Bits) => Unit = null,
-      priv: Seq[SpinalEnumElement[RvPrivLevel.type]] = Seq(RvPrivLevel.M)
+      priv: Seq[SpinalEnumElement[RvPrivLevel.type]] = Seq(RvPrivLevel.M),
+      microOpOnly: Boolean = false
   ): Unit = {
-    val accessOk = priv.map(x => rvCsr.csrFile.priv === x).orR
+    val accessOk =
+      if (microOpOnly) decode.isMicroOp
+      else priv.map(x => rvCsr.csrFile.priv === x).orR
 
     when(accessOk && csr.map(x => fetch.insn(31 downto 20) === x.resized).orR) {
       switch(op) {
@@ -342,6 +348,14 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
         Seq(0x7c0),
         csr.csrFile.custom_mcachedisable.asBits,
         x => csr.csrFile.custom_mcachedisable := x(0)
+      )
+
+      // internal.scratch0
+      intent.on(
+        Seq(0xbc0),
+        csr.csrFile.internal_scratch0.asBits,
+        x => csr.csrFile.internal_scratch0 := x.asUInt,
+        microOpOnly = true
       )
 
       // Exception handling

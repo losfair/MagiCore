@@ -346,6 +346,7 @@ class TestIssue extends AnyFunSuite {
             p.decode.archSrcRegs(0).valid #= true
             p.decode.archSrcRegs(0).waitValue #= true
             p.decode.archSrcRegs(1).valid #= false
+            p.decode.isMicroOp #= false
           }
         )
         regContentMirror.update(dstRegIndex, regContentMirror(srcRegIndex) + 1)

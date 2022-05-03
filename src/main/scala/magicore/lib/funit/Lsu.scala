@@ -35,6 +35,7 @@ case class LsuOperation() extends Bundle with PolymorphicDataChain {
   val isFence = Bool()
   val isStore = Bool()
   val isLrSc = Bool()
+  val isMicroOp = Bool()
   val offset = SInt(spec.dataWidth)
   val size = LsuOperationSize()
   val signExt = Bool()
@@ -123,8 +124,10 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
     assert(spec.dataWidth.value == 32 || spec.dataWidth.value == 64)
 
     val addr = Bits(spec.addrWidth)
+    val dataIsZero = Bool()
     val dataPhysRegIndex = spec.physRegIndexType
     val strb = Bits((spec.dataWidth.value / 8) bits)
+    val isMicroOp = Bool()
     val isFence = Bool()
     val isStore = Bool()
     val token = CommitToken()
@@ -362,6 +365,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
       val firstStageLogic = new Area {
         val in = io_input.payload
         val op = in.lookup[LsuOperation]
+        val decode = in.lookup[DecodeInfo]
         val rename = in.lookup[RenameInfo]
         val dispatch = in.lookup[DispatchInfo]
         val issue = in.lookup[IssuePort[_]]
@@ -371,8 +375,10 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
           .srcRegData(0)
           .resize(spec.addrWidth)
           .asSInt + op.offset.resized).asBits
+        req.dataIsZero := !decode.archSrcRegs(1).valid
         req.dataPhysRegIndex := rename.physSrcRegs(1)
         req.isFence := op.isFence
+        req.isMicroOp := op.isMicroOp
         req.isStore := op.isStore
         req.size := op.size
         req.signExt := op.signExt
@@ -420,6 +426,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
 
       case class StoreDataWaitReq() extends Bundle {
         val token = CommitToken()
+        val dataIsZero = Bool()
         val dataPhysReg = spec.physRegIndexType
         val shift = UInt(byteOffsetWidth)
       }
@@ -429,7 +436,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
         input.setIdle()
 
         val req = input.queueLowLatency(8, latency = 1)
-        val dataAvailable =
+        val dataAvailable = req.payload.dataIsZero ||
           prfIf.state.table(req.payload.dataPhysReg).dataAvailable
 
         val commitReq = CommitRequest(null)
@@ -444,7 +451,9 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
           )
           .translateWith(commitReq)
 
-        val data = prfIf.readAsync(req.dataPhysReg).data
+        val data = req.dataIsZero ? B(0, spec.dataWidth) | prfIf
+          .readAsync(req.dataPhysReg)
+          .data
         pendingStoreData.write(
           address = req.payload.token.robIndex,
           data = (data << (req.shift << 3)).resize(data.getWidth),
@@ -493,6 +502,13 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               commitReq.exception := MachineException.idle
               commitReq.regWriteValue(0) := 1
               commitReq.token := req.payload.token
+
+              // Retry for micro-ops
+              when(req.payload.isMicroOp) {
+                commitReq.exception.valid := True
+                commitReq.exception.code := MachineExceptionCode.RETRY
+              }
+
               outStream_pipeline << req.translateWith(commitReq)
             } otherwise {
 
@@ -502,6 +518,7 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
               )
 
               val dataReq = StoreDataWaitReq()
+              dataReq.dataIsZero := req.payload.dataIsZero
               dataReq.dataPhysReg := req.payload.dataPhysRegIndex
               dataReq.shift := req.payload.addr.resize(byteOffsetWidth).asUInt
               dataReq.token := req.payload.token
@@ -629,7 +646,9 @@ class Lsu(staticTagData: => Data, c: LsuConfig) extends FunctionUnit {
                     " size=",
                     req.payload.size,
                     " lr=",
-                    req.payload.isLrSc
+                    req.payload.isLrSc,
+                    " isMicroOp=",
+                    req.payload.isMicroOp
                   )
                 )
               }

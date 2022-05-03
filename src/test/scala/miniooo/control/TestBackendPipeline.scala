@@ -142,6 +142,7 @@ class TestBackendPipeline extends AnyFunSuite {
         val op = LsuOperation()
         op.isFence := opc === GenericOpcode.MFENCE
         op.isLrSc := False
+        op.isMicroOp := False
         op.isStore := opc === GenericOpcode.ST_B || opc === GenericOpcode.ST_H || opc === GenericOpcode.ST_W
         op.size := opc.mux(
           GenericOpcode.ST_B -> LsuOperationSize.BYTE.craft(),
@@ -190,6 +191,7 @@ class TestBackendPipeline extends AnyFunSuite {
       out.decode.archSrcRegs(1).index #= rs2.getOrElse(0)
       out.decode.archDstRegs(0).valid #= rd.isDefined
       out.decode.archDstRegs(0).index #= rd.getOrElse(0)
+      out.decode.isMicroOp #= false
       out.decode.functionUnitTag.asInstanceOf[TestTag].tag #= t
       out.const #= const.getOrElse(BigInt(0))
       out.replaceOperandBwithConst #= const.isDefined && !doNotUseConst

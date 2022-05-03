@@ -18,6 +18,8 @@ import magicore.lib.funit.EarlyException
 import magicore.lib.funit.MultiplierOperation
 import magicore.lib.funit.SlowAluOperation
 import magicore.lib.funit.SlowAluOpcode
+import spinal.lib.fsm._
+import scala.collection.mutable.ArrayBuffer
 
 object ImmType extends SpinalEnum(binarySequential) {
   private val mspec = Machine.get[MachineSpec]
@@ -56,6 +58,7 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
   private val fspec = Machine.get[FrontendSpec]
   val fetch = FetchPacket()
 
+  val isMicroOp = Bool()
   val rs1Valid = Bool()
   val rs2Valid = Bool()
   val rdValid = Bool()
@@ -91,6 +94,7 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
       x.archSrcRegs(1).index := fetch.insn(E.rs2Range).asUInt
       x.archDstRegs(0).valid := rdValid
       x.archDstRegs(0).index := fetch.insn(E.rdRange).asUInt
+      x.isMicroOp := isMicroOp
       x.functionUnitTag := fuTag
       Some(x.asInstanceOf[T])
     } else if (ctag == classTag[AluOperation]) {
@@ -163,6 +167,7 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
     } else if (ctag == classTag[LsuOperation]) {
       val opc = fetch.insn(6 downto 2)
       val x = LsuOperation()
+      x.isMicroOp := isMicroOp
 
       when(opc === B"01011") {
         // AMO
@@ -228,6 +233,18 @@ case class DecodePacket() extends Bundle with PolymorphicDataChain {
         is(E.CTZ) {
           op.opcode := SlowAluOpcode.CTZ
         }
+        is(E.MAX) {
+          op.opcode := SlowAluOpcode.MAX_S
+        }
+        is(E.MAXU) {
+          op.opcode := SlowAluOpcode.MAX_U
+        }
+        is(E.MIN) {
+          op.opcode := SlowAluOpcode.MIN_S
+        }
+        is(E.MINU) {
+          op.opcode := SlowAluOpcode.MIN_U
+        }
         default {
           op.assignDontCare()
         }
@@ -243,6 +260,14 @@ case class DecodeIntrInjectionInfo() extends Bundle {
   val cause = UInt(4 bits)
 }
 
+case class RvAnnotatedFetchPacket() extends Bundle {
+  val fetch = FetchPacket()
+  val microOp = Bool()
+  val unsuppressRs1 = Bool()
+  val unsuppressRs2 = Bool()
+  val unsuppressRd = Bool()
+}
+
 case class RiscvDecoder(
     rv64: Boolean,
     aluPort: Data,
@@ -253,6 +278,8 @@ case class RiscvDecoder(
     csrPort: Data,
     slowAluPort: Data
 ) extends Area {
+  import RvDecoderExt._
+
   val E = RvEncoding
   // TODO: RVC
   private val fspec = Machine.get[FrontendSpec]
@@ -266,20 +293,23 @@ case class RiscvDecoder(
     val branchInfoFeedback = BranchInfoFeedback()
   }
 
+  val inputStream = io.input.rvAnnotate.expandMicroOps
+
   val exc = Machine.get[MachineException]
 
   val wantStall = False
 
   val stalled = Reg(
     Bool()
-  ) init (false) setWhen (io.input.fire && wantStall) clearWhen (exc.valid)
+  ) init (false) setWhen (inputStream.fire && wantStall) clearWhen (exc.valid)
 
-  val insn = io.input.payload.insn
+  val insn = inputStream.payload.fetch.insn
   val imm = E.IMM(insn)
   val opc = insn(6 downto 0)
 
   val out = DecodePacket()
-  out.fetch := io.input.payload
+  out.fetch := inputStream.payload.fetch
+  out.isMicroOp := inputStream.payload.microOp
   out.rs1Valid := False
   out.rs2Valid := False
   out.rdValid := False
@@ -287,9 +317,17 @@ case class RiscvDecoder(
   out.isStore := False
 
   val outPatched = DecodePacket()
-  outPatched.rs1Valid := out.rs1Valid && insn(E.rs1Range).asUInt =/= 0
-  outPatched.rs2Valid := out.rs2Valid && insn(E.rs2Range).asUInt =/= 0
-  outPatched.rdValid := out.rdValid && insn(E.rdRange).asUInt =/= 0
+
+  // Micro-ops can use R0 as a scratch register
+  outPatched.rs1Valid := out.rs1Valid && (insn(
+    E.rs1Range
+  ).asUInt =/= 0 || inputStream.payload.unsuppressRs1)
+  outPatched.rs2Valid := out.rs2Valid && (insn(
+    E.rs2Range
+  ).asUInt =/= 0 || inputStream.payload.unsuppressRs2)
+  outPatched.rdValid := out.rdValid && (insn(
+    E.rdRange
+  ).asUInt =/= 0 || inputStream.payload.unsuppressRd)
   outPatched.assignUnassignedByName(out)
 
   when(out.fetch.cacheMiss) {
@@ -298,14 +336,15 @@ case class RiscvDecoder(
     wantStall := True
   }
 
-  when(intrSvc.trigger) {
+  // Suppress interrupts during micro-op sequences.
+  when(intrSvc.trigger && !inputStream.payload.microOp) {
     outPatched.fuTag := earlyExceptionPort
     outPatched.earlyExc.code := MachineExceptionCode.EXT_INTERRUPT
     wantStall := True
   }
 
   val discardOutput = False
-  io.output << io.input
+  io.output << inputStream
     .translateWith(outPatched)
     .continueWhen(!stalled)
     .throwWhen(discardOutput)
@@ -316,10 +355,34 @@ case class RiscvDecoder(
     out.immType.assignDontCare()
   }
 
-  io.branchInfoFeedback := BranchInfoFeedback.idle
+  // Fast branch feedback path - do not go through microcode sequencer
+  val fastBranchFeedbackLogic = new Area {
+    io.branchInfoFeedback := BranchInfoFeedback.idle
 
-  val brFeedback_offset = UInt(32 bits) assignDontCare ()
-  io.branchInfoFeedback.target := io.input.payload.pc + brFeedback_offset
+    val brFeedback_offset = UInt(32 bits) assignDontCare ()
+    switch(io.input.payload.insn) {
+      is(
+        E.BEQ(false),
+        E.BNE(false),
+        E.BLT(false),
+        E.BGE(false),
+        E.BLTU(false),
+        E.BGEU(false)
+      ) {
+        io.branchInfoFeedback.isConditionalBranch := True
+        io.branchInfoFeedback.backward := insn(31)
+        brFeedback_offset := imm.b_sext.asUInt
+      }
+      is(E.JAL(false)) {
+        io.branchInfoFeedback.isUnconditionalStaticBranch := True
+        brFeedback_offset := imm.j_sext.asUInt
+      }
+      is(E.JALR) {
+        io.branchInfoFeedback.isUnconditionalDynamicBranch := True
+      }
+    }
+    io.branchInfoFeedback.target := io.input.payload.pc + brFeedback_offset
+  }
 
   val csr = Machine.get[RvCsrFileReg]
 
@@ -332,24 +395,17 @@ case class RiscvDecoder(
       E.BLTU(false),
       E.BGEU(false)
     ) {
-      io.branchInfoFeedback.isConditionalBranch := True
-      io.branchInfoFeedback.backward := insn(31)
-      brFeedback_offset := imm.b_sext.asUInt
-
       out.rs1Valid := True
       out.rs2Valid := True
       out.fuTag := aluPort
       out.immType := ImmType.B
     }
     is(E.JAL(false)) {
-      io.branchInfoFeedback.isUnconditionalStaticBranch := True
-      brFeedback_offset := imm.j_sext.asUInt
       out.rdValid := True
       out.fuTag := aluPort
       out.immType := ImmType.J
     }
     is(E.JALR) {
-      io.branchInfoFeedback.isUnconditionalDynamicBranch := True
       out.rdValid := True
       out.rs1Valid := True
       out.fuTag := aluPort
@@ -388,6 +444,13 @@ case class RiscvDecoder(
     is(E.CLZ, E.CTZ) {
       out.rdValid := True
       out.rs1Valid := True
+      out.fuTag := slowAluPort
+      out.immType := ImmType.X
+    }
+    is(E.MAX, E.MAXU, E.MIN, E.MINU) {
+      out.rdValid := True
+      out.rs1Valid := True
+      out.rs2Valid := True
       out.fuTag := slowAluPort
       out.immType := ImmType.X
     }
@@ -555,3 +618,241 @@ case class RiscvDecoder(
   }
 
 }
+
+object RvDecoderExt {
+  implicit class FetchStreamExt(fetch: Stream[FetchPacket]) {
+    def rvAnnotate: Stream[RvAnnotatedFetchPacket] = {
+      val x = RvAnnotatedFetchPacket()
+      x.fetch := fetch.payload
+      x.microOp := False
+      x.unsuppressRs1 := False
+      x.unsuppressRs2 := False
+      x.unsuppressRd := False
+      fetch.translateWith(x)
+    }
+  }
+
+  implicit class AnnotatedFetchStreamExt(s: Stream[RvAnnotatedFetchPacket]) {
+    def expandMicroOps: Stream[RvAnnotatedFetchPacket] =
+      Machine.get[MachineException].resetArea {
+        val E = RvEncoding
+        val out =
+          Stream(RvAnnotatedFetchPacket()) setCompositeName (s, postfix =
+            "expandMicroOps")
+        out.setIdle()
+
+        def genAmoState(d: Bool, template: Bits): StateMachine = {
+          val internalScratchCsr0 = 0xbc0 // internal.scratch0
+          new StateMachine {
+            val init = new State with EntryPoint {
+              whenIsActive {
+                val data = RvAnnotatedFetchPacket()
+                data.fetch.insn := E.LR_W.value
+                data.fetch.insn(E.rdRange) := 0
+                data.fetch.insn(E.rs1Range) := s.payload.fetch.insn(E.rs1Range)
+                data.fetch.insn(26 downto 25) := 0 // aq/rl
+                data.fetch.insn(12) := d
+                data.fetch.assignUnassignedByName(s.payload.fetch)
+                data.microOp := False // Do not suppress interrupts here
+                data.unsuppressRd := True
+                data.unsuppressRs1 := False
+                data.unsuppressRs2 := False
+                out.valid := True
+                out.payload := data
+                when(out.ready) {
+                  goto(buffer)
+                }
+              }
+            }
+            val buffer = new State {
+              whenIsActive {
+                val data = RvAnnotatedFetchPacket()
+                data.fetch.insn := E.CSRRW.value
+                data.fetch.insn(31 downto 20) := internalScratchCsr0
+                data.fetch.insn(E.rdRange) := 0
+                data.fetch.insn(E.rs1Range) := 0
+                data.fetch.insn(E.rs2Range) := 0
+                data.fetch.assignUnassignedByName(s.payload.fetch)
+                data.microOp := True
+                data.unsuppressRd := False
+                data.unsuppressRs1 := True
+                data.unsuppressRs2 := False
+                out.valid := True
+                out.payload := data
+                when(out.ready) {
+                  goto(compute)
+                }
+              }
+            }
+            val compute = new State {
+              whenIsActive {
+                val data = RvAnnotatedFetchPacket()
+                val insn = Bits(32 bits)
+                insn := template
+                insn(E.rdRange) := 0
+                insn(E.rs1Range) := 0
+                insn(E.rs2Range) := s.payload.fetch.insn(E.rs2Range)
+                data.fetch.insn := insn
+                data.fetch.assignUnassignedByName(s.payload.fetch)
+                data.microOp := True
+                data.unsuppressRd := True
+                data.unsuppressRs1 := True
+                data.unsuppressRs2 := False
+                out.valid := True
+                out.payload := data
+                when(out.ready) {
+                  goto(sc)
+                }
+              }
+            }
+            val sc = new State {
+              whenIsActive {
+                val data = RvAnnotatedFetchPacket()
+                data.fetch.insn := E.SC_W.value
+                data.fetch.insn(E.rdRange) := 0
+                data.fetch.insn(E.rs1Range) := s.payload.fetch.insn(E.rs1Range)
+                data.fetch.insn(E.rs2Range) := 0
+                data.fetch.insn(26 downto 25) := 0 // aq/rl
+                data.fetch.insn(12) := d
+                data.fetch.assignUnassignedByName(s.payload.fetch)
+                data.microOp := True
+                data.unsuppressRd := False
+                data.unsuppressRs1 := False
+                data.unsuppressRs2 := True
+                out.valid := True
+                out.payload := data
+                when(out.ready) {
+                  goto(result)
+                }
+              }
+            }
+            val result = new State {
+              whenIsActive {
+                val data = RvAnnotatedFetchPacket()
+                data.fetch.insn := E.CSRRS.value
+                data.fetch.insn(31 downto 20) := internalScratchCsr0
+                data.fetch.insn(E.rdRange) := s.payload.fetch.insn(E.rdRange)
+                data.fetch.insn(E.rs1Range) := 0
+                data.fetch.insn(E.rs2Range) := 0
+                data.fetch.assignUnassignedByName(s.payload.fetch)
+                data.microOp := True
+                data.unsuppressRd := False
+                data.unsuppressRs1 := False
+                data.unsuppressRs2 := False
+                out.valid := True
+                out.payload := data
+                s.ready := out.ready
+                when(out.ready) {
+                  exit()
+                }
+              }
+            }
+          }
+        }
+
+        val d = Reg(Bool())
+        val template = Reg(Bits(32 bits))
+
+        s.setBlocked()
+
+        val fsm = new StateMachine {
+          val init: State = new State with EntryPoint {
+            whenIsActive {
+              def jump(
+                  matches: MaskedLiteral,
+                  newD: Bool,
+                  newTemplate: BigInt
+              ) {
+                is(matches) {
+                  d := newD
+                  template := newTemplate
+                  goto(emitAmo)
+                }
+              }
+
+              when(s.valid) {
+                switch(s.payload.fetch.insn) {
+                  jump(E.AMOADD_D, True, E.ADD.value)
+                  jump(E.AMOADD_W, False, E.ADD.value)
+                  jump(E.AMOXOR_D, True, E.XOR.value)
+                  jump(E.AMOXOR_W, False, E.XOR.value)
+                  jump(E.AMOAND_D, True, E.AND.value)
+                  jump(E.AMOAND_W, False, E.AND.value)
+                  jump(E.AMOOR_D, True, E.OR.value)
+                  jump(E.AMOOR_W, False, E.OR.value)
+                  jump(E.AMOMIN_D, True, E.MIN.value)
+                  jump(E.AMOMIN_W, False, E.MIN.value)
+                  jump(E.AMOMAX_D, True, E.MAX.value)
+                  jump(E.AMOMAX_W, False, E.MAX.value)
+                  jump(E.AMOMINU_D, True, E.MINU.value)
+                  jump(E.AMOMINU_W, False, E.MINU.value)
+                  jump(E.AMOMAXU_D, True, E.MAXU.value)
+                  jump(E.AMOMAXU_W, False, E.MAXU.value)
+                  default {
+                    out << s
+                  }
+                }
+              }
+            }
+          }
+          val emitAmo: State =
+            new StateFsm(genAmoState(d = d, template = template)) {
+              whenCompleted {
+                goto(init)
+              }
+            }
+        }
+
+        out
+      }
+
+  }
+}
+
+/*
+
+class RvSequencer extends Area {
+  case class Token(offset: Int, len: Int)
+  case class Entry() extends Bundle {
+    val template = Bits(32 bits)
+  }
+  val maxCapacity = 128
+  val indexWidth = log2Up(maxCapacity) bits
+  val rom = Mem(Bits(32 bits), maxCapacity)
+
+  val sequences: ArrayBuffer[Bits] = new ArrayBuffer()
+
+  val currentIndex = Reg(UInt(indexWidth))
+  val remaining = Reg(UInt(indexWidth)) init (0)
+
+  val output = Stream(Bits(32 bits))
+  output.valid := remaining =/= 0
+  output.payload := rom(currentIndex)
+
+  when(output.fire) {
+    remaining := remaining - 1
+    currentIndex := currentIndex + 1
+  }
+
+  Component.current.afterElaboration {
+    rom.init(sequences.padTo(maxCapacity, B(0, 32 bits)))
+  }
+
+  def add(seq: Seq[Bits]): Token = {
+    val offset = sequences.length
+    sequences ++= seq
+    Token(offset = offset, len = seq.size)
+  }
+
+  def addBigInt(seq: Seq[BigInt]): Token = {
+    val offset = sequences.length
+    sequences ++= seq.map(x => B(x, 32 bits))
+    Token(offset = offset, len = seq.size)
+  }
+
+  def trigger(token: Token): Unit = {
+    currentIndex := token.offset
+    remaining := token.len
+  }
+}
+ */

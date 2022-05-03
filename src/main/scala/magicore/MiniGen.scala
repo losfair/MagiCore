@@ -100,6 +100,7 @@ class MiniGen extends Component {
         op.isStore := opc === GenericOpcode.ST
         op.isFence := False
         op.isLrSc := False
+        op.isMicroOp := False
         op.size := LsuOperationSize.WORD
         op.offset := const.asSInt
         op.signExt := False

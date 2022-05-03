@@ -161,7 +161,7 @@ object FullMachineException {
 object MachineExceptionCode extends SpinalEnum(binarySequential) {
   val BRANCH_MISS, INSN_CACHE_MISS, DECODE_ERROR, DIVIDE_ERROR, SERIALIZE,
       MEMORY_ERROR, INSN_CACHE_FLUSH, EXCEPTION_RETURN, INSN_ALIGNMENT_ERROR,
-      EXT_INTERRUPT, ENV_CALL, WFI = newElement()
+      EXT_INTERRUPT, ENV_CALL, WFI, RETRY = newElement()
 
   def shouldSuppressWriteback(
       code: SpinalEnumCraft[MachineExceptionCode.type]

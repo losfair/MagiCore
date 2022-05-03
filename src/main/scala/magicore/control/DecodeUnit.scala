@@ -15,5 +15,6 @@ case class DecodeInfo(inner: HardType[_ <: PolymorphicDataChain]) extends Bundle
   val functionUnitTag = spec.functionUnitTagType()
   val archSrcRegs = Vec(MaybeArchRegIndex(), spec.maxNumSrcRegsPerInsn)
   val archDstRegs = Vec(MaybeArchRegIndex(), spec.maxNumDstRegsPerInsn)
+  val isMicroOp = Bool()
   val parentObjects = if(inner != null) Seq(inner()) else Seq()
 }
