@@ -362,6 +362,7 @@ case class RiscvDecoder(
     io.branchInfoFeedback := BranchInfoFeedback.idle
 
     val brFeedback_offset = UInt(32 bits) assignDontCare ()
+    val imm = E.IMM(io.input.payload.insn)
     switch(io.input.payload.insn) {
       is(
         E.BEQ(false),
@@ -372,7 +373,7 @@ case class RiscvDecoder(
         E.BGEU(false)
       ) {
         io.branchInfoFeedback.isConditionalBranch := True
-        io.branchInfoFeedback.backward := insn(31)
+        io.branchInfoFeedback.backward := io.input.payload.insn(31)
         brFeedback_offset := imm.b_sext.asUInt
       }
       is(E.JAL(false)) {
