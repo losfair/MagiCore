@@ -15,7 +15,8 @@ case class RiscvProcessor(
     debug: Boolean = false,
     initBranchPredictionBuffers: Boolean = false,
     rv64: Boolean = false,
-    ioMemoryRegions: Seq[SizeMapping] = Seq()
+    ioMemoryRegions: Seq[SizeMapping] = Seq(),
+    amo: Boolean = true
 ) extends Area {
   object FuTag extends SpinalEnum(binarySequential) {
     val ALU, LSU, MUL, DIV, SLOW_ALU, EARLY_EXC, CSR = newElement()
@@ -77,6 +78,7 @@ case class RiscvProcessor(
 
   val fetch = FetchUnit()
   val decode = RiscvDecoder(
+    amo = amo,
     rv64 = rv64,
     aluPort = FuTag.ALU,
     earlyExceptionPort = FuTag.EARLY_EXC,

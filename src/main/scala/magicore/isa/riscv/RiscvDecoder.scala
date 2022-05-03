@@ -270,6 +270,7 @@ case class RvAnnotatedFetchPacket() extends Bundle {
 
 case class RiscvDecoder(
     rv64: Boolean,
+    amo: Boolean,
     aluPort: Data,
     earlyExceptionPort: Data,
     lsuPort: Data,
@@ -293,7 +294,8 @@ case class RiscvDecoder(
     val branchInfoFeedback = BranchInfoFeedback()
   }
 
-  val inputStream = io.input.rvAnnotate.expandMicroOps
+  var inputStream = io.input.rvAnnotate
+  if (amo) inputStream = inputStream.expandAmoMicroOps
 
   val exc = Machine.get[MachineException]
 
@@ -633,15 +635,16 @@ object RvDecoderExt {
   }
 
   implicit class AnnotatedFetchStreamExt(s: Stream[RvAnnotatedFetchPacket]) {
-    def expandMicroOps: Stream[RvAnnotatedFetchPacket] =
+    def expandAmoMicroOps: Stream[RvAnnotatedFetchPacket] =
       Machine.get[MachineException].resetArea {
         val E = RvEncoding
         val out =
           Stream(RvAnnotatedFetchPacket()) setCompositeName (s, postfix =
-            "expandMicroOps")
+            "expandAmoMicroOps")
         out.setIdle()
 
-        def genAmoState(d: Bool, template: Bits): StateMachine = {
+        def genAmoState(d: Bool, template: Bits, suppressRs1ForTemplate: Bool)
+            : StateMachine = {
           val internalScratchCsr0 = 0xbc0 // internal.scratch0
           new StateMachine {
             val init = new State with EntryPoint {
@@ -696,7 +699,7 @@ object RvDecoderExt {
                 data.fetch.assignUnassignedByName(s.payload.fetch)
                 data.microOp := True
                 data.unsuppressRd := True
-                data.unsuppressRs1 := True
+                data.unsuppressRs1 := !suppressRs1ForTemplate
                 data.unsuppressRs2 := False
                 out.valid := True
                 out.payload := data
@@ -752,6 +755,7 @@ object RvDecoderExt {
 
         val d = Reg(Bool())
         val template = Reg(Bits(32 bits))
+        val suppressRs1ForTemplate = Reg(Bool())
 
         s.setBlocked()
 
@@ -761,33 +765,50 @@ object RvDecoderExt {
               def jump(
                   matches: MaskedLiteral,
                   newD: Bool,
-                  newTemplate: BigInt
+                  newTemplate: BigInt,
+                  newSuppressRs1ForTemplate: Bool = False
               ) {
                 is(matches) {
                   d := newD
                   template := newTemplate
+                  suppressRs1ForTemplate := newSuppressRs1ForTemplate
                   goto(emitAmo)
                 }
               }
 
               when(s.valid) {
                 switch(s.payload.fetch.insn) {
-                  jump(E.AMOADD_D, True, E.ADD.value)
+                  jump(
+                    E.AMOSWAP_W,
+                    False,
+                    E.ADD.value,
+                    newSuppressRs1ForTemplate = True
+                  )
                   jump(E.AMOADD_W, False, E.ADD.value)
-                  jump(E.AMOXOR_D, True, E.XOR.value)
                   jump(E.AMOXOR_W, False, E.XOR.value)
-                  jump(E.AMOAND_D, True, E.AND.value)
                   jump(E.AMOAND_W, False, E.AND.value)
-                  jump(E.AMOOR_D, True, E.OR.value)
                   jump(E.AMOOR_W, False, E.OR.value)
-                  jump(E.AMOMIN_D, True, E.MIN.value)
                   jump(E.AMOMIN_W, False, E.MIN.value)
-                  jump(E.AMOMAX_D, True, E.MAX.value)
                   jump(E.AMOMAX_W, False, E.MAX.value)
-                  jump(E.AMOMINU_D, True, E.MINU.value)
                   jump(E.AMOMINU_W, False, E.MINU.value)
-                  jump(E.AMOMAXU_D, True, E.MAXU.value)
                   jump(E.AMOMAXU_W, False, E.MAXU.value)
+
+                  if (Machine.get[MachineSpec].dataWidth.value == 64) {
+                    jump(
+                      E.AMOSWAP_D,
+                      True,
+                      E.ADD.value,
+                      newSuppressRs1ForTemplate = True
+                    )
+                    jump(E.AMOADD_D, True, E.ADD.value)
+                    jump(E.AMOXOR_D, True, E.XOR.value)
+                    jump(E.AMOAND_D, True, E.AND.value)
+                    jump(E.AMOOR_D, True, E.OR.value)
+                    jump(E.AMOMIN_D, True, E.MIN.value)
+                    jump(E.AMOMAX_D, True, E.MAX.value)
+                    jump(E.AMOMINU_D, True, E.MINU.value)
+                    jump(E.AMOMAXU_D, True, E.MAXU.value)
+                  }
                   default {
                     out << s
                   }
@@ -796,7 +817,13 @@ object RvDecoderExt {
             }
           }
           val emitAmo: State =
-            new StateFsm(genAmoState(d = d, template = template)) {
+            new StateFsm(
+              genAmoState(
+                d = d,
+                template = template,
+                suppressRs1ForTemplate = suppressRs1ForTemplate
+              )
+            ) {
               whenCompleted {
                 goto(init)
               }
@@ -808,51 +835,3 @@ object RvDecoderExt {
 
   }
 }
-
-/*
-
-class RvSequencer extends Area {
-  case class Token(offset: Int, len: Int)
-  case class Entry() extends Bundle {
-    val template = Bits(32 bits)
-  }
-  val maxCapacity = 128
-  val indexWidth = log2Up(maxCapacity) bits
-  val rom = Mem(Bits(32 bits), maxCapacity)
-
-  val sequences: ArrayBuffer[Bits] = new ArrayBuffer()
-
-  val currentIndex = Reg(UInt(indexWidth))
-  val remaining = Reg(UInt(indexWidth)) init (0)
-
-  val output = Stream(Bits(32 bits))
-  output.valid := remaining =/= 0
-  output.payload := rom(currentIndex)
-
-  when(output.fire) {
-    remaining := remaining - 1
-    currentIndex := currentIndex + 1
-  }
-
-  Component.current.afterElaboration {
-    rom.init(sequences.padTo(maxCapacity, B(0, 32 bits)))
-  }
-
-  def add(seq: Seq[Bits]): Token = {
-    val offset = sequences.length
-    sequences ++= seq
-    Token(offset = offset, len = seq.size)
-  }
-
-  def addBigInt(seq: Seq[BigInt]): Token = {
-    val offset = sequences.length
-    sequences ++= seq.map(x => B(x, 32 bits))
-    Token(offset = offset, len = seq.size)
-  }
-
-  def trigger(token: Token): Unit = {
-    currentIndex := token.offset
-    remaining := token.len
-  }
-}
- */
