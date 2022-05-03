@@ -6,8 +6,8 @@ An out-of-order processor that supports multiple instruction sets. My playground
 
 ## ISA support status
 
-- [x] RISC-V RV32IMU
-- [x] RISC-V RV64IMU
+- [x] RISC-V RV32IMAU
+- [x] RISC-V RV64IMAU
 - [ ] eBPF
 - [ ] MIPS
 

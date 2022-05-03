@@ -43,8 +43,8 @@ async def monitor_uart(dut):
             await Timer(duration, "ns")
             if rx != 1:
                 raise Exception("UART stop bit error")
-        sys.stdout.write(chr(data))
-        sys.stdout.flush()
+        sys.stderr.write(chr(data))
+        sys.stderr.flush()
 
 class AxiDebugControllerRegion(Region):
     def __init__(self, size=4096, **kwargs):
@@ -60,8 +60,8 @@ class AxiDebugControllerRegion(Region):
         value = struct.unpack("<I", data)[0]
         if address == 0:
             #pass
-            sys.stdout.write(chr(value))
-            sys.stdout.flush()
+            sys.stderr.write(chr(value))
+            sys.stderr.flush()
         elif address == 4:
             self.stop = True
         elif address == 8:

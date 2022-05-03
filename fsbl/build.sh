@@ -15,4 +15,4 @@ llvm-objcopy \
   ./target/riscv${MODE}im-unknown-none-elf/release/fsbl \
   --binary-architecture=riscv${MODE} --strip-all -O binary \
   firmware.bin
-llvm-objdump --mattr=+m -D ./target/riscv${MODE}im-unknown-none-elf/release/fsbl > firmware.dump
+llvm-objdump --mattr=+m,+a -D ./target/riscv${MODE}im-unknown-none-elf/release/fsbl > firmware.dump
