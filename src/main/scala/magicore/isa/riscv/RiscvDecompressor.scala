@@ -21,6 +21,7 @@ case class RiscvDecompressor() extends Area {
   case class Slice() extends Bundle {
     val fetch = FetchPacket(hasInsn = false)
     val data = Bits(sliceWidth)
+    val headOfLine = Bool()
   }
 
   assert(input.payload.insn.getWidth % sliceWidth.value == 0)
@@ -78,10 +79,19 @@ case class RiscvDecompressor() extends Area {
         slice.fetch.pc := (higherBits ## lowerBits).asUInt
         slice.fetch.assignUnassignedByName(input.payload)
         slice.data := slices(i)
+        slice.headOfLine := Bool(i == 0)
 
         when(enable) {
           assert(subCounter < nextBuffer.size, "subCounter overflow")
           nextBuffer(subCounter.resize(log2Up(nextBuffer.size) bits)) := slice
+          Machine.report(
+            Seq(
+              "Decompressor buffer push: pc=",
+              slice.fetch.pc,
+              " data=",
+              slice.data
+            )
+          )
         }
         subCounter = enable.mux(
           False -> subCounter,
@@ -100,6 +110,14 @@ case class RiscvDecompressor() extends Area {
     val second = state.buffer(1)
     val secondValid = state.bufferTop =/= 1
 
+    // Integrity cases:
+    // 1. 4-byte instruction, head-of-line aligned, branch predicted - OK.
+    // 2. 4-byte instruction, NOT aligned, branched predicted on the first half - ERROR. The second half is not part of this instruction.
+    // 3. 2-byte instruction, head-of-line aligned, branch predicted -
+    //    If not a branch, suppress its own branch signal.
+    //    Otherwise, prevent the second half from being issued.
+    // 4. 2-byte instruction, NOT aligned, branch predicted - OK.
+
     output.setIdle()
     output.payload.assignSomeByName(first.fetch)
 
@@ -109,17 +127,39 @@ case class RiscvDecompressor() extends Area {
         when(secondValid) {
           output.valid := True
           output.payload.insn := second.data ## first.data
-          when(output.ready) {
+          // Integrity case 2
+          output.payload.decompressionIntegrityError := !first.headOfLine && first.fetch.predictedBranchValid
+
+          output.payload.cacheMiss := first.fetch.cacheMiss || second.fetch.cacheMiss
+          output.payload.cacheMissOffset := first.fetch.cacheMiss ? U(0) | U(
+            2
+          )
+
+          when(output.fire) {
             bufferShiftAmount := 2
           }
         }
       } otherwise {
         // Compressed - decompress & issue
         output.valid := True
-        output.payload.insn := RiscvDecompressorUtil.decompressOnce(first.data)
+        val (decompressed, jump) =
+          RiscvDecompressorUtil.decompressOnce(first.data)
+        output.payload.insn := decompressed
         output.payload.compressed := True
-        when(output.ready) {
+        when(output.fire) {
           bufferShiftAmount := 1
+        }
+
+        // Integrity case 3
+        when(first.headOfLine && first.fetch.predictedBranchValid) {
+          when(!jump) {
+            output.payload.predictedBranchValid := False
+          } otherwise {
+            output.valid := secondValid
+            when(output.fire) {
+              bufferShiftAmount := 2
+            }
+          }
         }
       }
     }
@@ -132,7 +172,8 @@ object RiscvDecompressorUtil {
     B"01" ## from
   }
 
-  def decompressOnce(from: Bits): Bits = {
+  def decompressOnce(from: Bits): (Bits, Bool) = {
+    val jump = False
     val rv64 = Machine.get[MachineSpec].dataWidth.value == 64
     val E = RvEncoding
 
@@ -262,7 +303,7 @@ object RiscvDecompressorUtil {
 
           out := E.ADDI.value
           out(31 downto 20) := nzimm_.asSInt.resize(12 bits).asBits
-          out(E.rdRange) := decompressRegIndex(from(4 downto 2))
+          out(E.rdRange) := 2
           out(E.rs1Range) := 2
         } otherwise {
           // C.LUI
@@ -353,6 +394,7 @@ object RiscvDecompressorUtil {
       }
       is(M"101-----------01") {
         // C.J
+        jump := True
         val imm_ = B(0, 12 bits)
         imm_(11) := from(12)
         imm_(4) := from(11)
@@ -377,6 +419,7 @@ object RiscvDecompressorUtil {
       }
       is(M"110-----------01") {
         // C.BEQZ
+        jump := True
         val imm_ = B(0, 9 bits)
         imm_(8) := from(12)
         imm_(4 downto 3) := from(11 downto 10)
@@ -395,6 +438,7 @@ object RiscvDecompressorUtil {
       }
       is(M"111-----------01") {
         // C.BNEZ
+        jump := True
         val imm_ = B(0, 9 bits)
         imm_(8) := from(12)
         imm_(4 downto 3) := from(11 downto 10)
@@ -451,6 +495,7 @@ object RiscvDecompressorUtil {
       is(M"1000----------10") {
         when(from(6 downto 2) === 0) {
           // C.JR
+          jump := True
           when(from(11 downto 7) === 0) {
             throwAsIllegal()
           } otherwise {
@@ -471,6 +516,7 @@ object RiscvDecompressorUtil {
             throwAsIllegal()
           } otherwise {
             // C.JALR
+            jump := True
             out := E.JALR.value
             out(E.rdRange) := 1
             out(E.rs1Range) := from(11 downto 7)
@@ -511,6 +557,6 @@ object RiscvDecompressorUtil {
         throwAsIllegal()
       }
     }
-    out
+    (out, jump)
   }
 }

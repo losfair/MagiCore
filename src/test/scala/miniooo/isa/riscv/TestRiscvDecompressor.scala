@@ -25,6 +25,7 @@ class TestRiscvDecompressor extends AnyFunSuite {
     def toFetchPacket(): FetchPacket = {
       val pkt = FetchPacket()
       pkt.cacheMiss := False
+      pkt.decompressionIntegrityError := False
       pkt.compressed := False
       pkt.globalHistory := 0
       pkt.insn := insn
