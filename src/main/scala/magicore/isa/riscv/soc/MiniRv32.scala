@@ -172,7 +172,6 @@ case class MiniRv32() extends Component {
   var masDataAxi =
     mas.toAxi4ReadOnly(slaveIdWidth).createDownsizerOnSlaveSide(dataWidth)
   val uartAxi = uart.io.axi.createDownsizerOnSlaveSide(dataWidth)
-  val clintAxi = clint.io.bus.createDownsizerOnSlaveSide(dataWidth)
   val intrControllerAxi =
     intrController.io.bus.createDownsizerOnSlaveSide(dataWidth)
 
@@ -194,7 +193,7 @@ case class MiniRv32() extends Component {
     uartAxi -> SizeMapping(BigInt("ff010000", 16), 0x100),
     masCtrlAxi -> SizeMapping(BigInt("ff010100", 16), 0x100),
     intrControllerAxi -> SizeMapping(BigInt("ff010200", 16), 0x100),
-    clintAxi -> SizeMapping(BigInt("ff020000", 16), 0x10000),
+    clint.io.bus -> SizeMapping(BigInt("ff020000", 16), 0x10000),
     masDataAxi -> SizeMapping(BigInt("fe000000", 16), mas.bufferSizeInBytes),
     plicAxi4 -> SizeMapping(BigInt("e0000000", 16), 0x4000000)
   )
@@ -205,7 +204,7 @@ case class MiniRv32() extends Component {
       ocram.io.axi,
       extBus,
       uartAxi,
-      clintAxi,
+      clint.io.bus,
       intrControllerAxi,
       masCtrlAxi,
       masDataAxi,
