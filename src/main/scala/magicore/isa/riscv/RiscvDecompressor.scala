@@ -314,6 +314,7 @@ object RiscvDecompressorUtil {
           out(31 downto 12) := nzimm_(17 downto 12).asSInt
             .resize(20 bits)
             .asBits
+          out(E.rdRange) := from(11 downto 7)
         }
       }
       is(M"100-00--------01") {
