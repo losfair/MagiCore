@@ -187,8 +187,8 @@ case class MiniRv32() extends Component {
     bootromAxi -> SizeMapping(0x00010000, bootromBackingStore.byteCount),
     ocram.io.axi -> SizeMapping(0x00020000, ocram.byteCount),
     extBus -> SizeMapping(
-      0x00100000,
-      BigInt("c0000000", 16) - 0x00100000
+      0x10000000,
+      BigInt("c0000000", 16) - 0x10000000
     ), // Zynq DDR + PL fabric range
     uartAxi -> SizeMapping(BigInt("ff010000", 16), 0x100),
     masCtrlAxi -> SizeMapping(BigInt("ff010100", 16), 0x100),
