@@ -17,8 +17,11 @@ case class RiscvProcessor(
     rv64: Boolean = false,
     ioMemoryRegions: Seq[SizeMapping] = Seq(),
     amo: Boolean = true,
-    compressed: Boolean = true
+    compressed: Boolean = false
 ) extends Area {
+  if(!rv64 && compressed) {
+    throw new Exception("RV32 with compressed is not supported")
+  }
   object FuTag extends SpinalEnum(binarySequential) {
     val ALU, LSU, MUL, DIV, SLOW_ALU, EARLY_EXC, CSR = newElement()
   }

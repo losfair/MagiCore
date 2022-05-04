@@ -194,7 +194,8 @@ object RiscvDecompressorUtil {
         uimm(6) := from(5)
 
         out := E.SW.value
-        out(31 downto 20) := uimm
+        out(31 downto 25) := uimm(11 downto 5)
+        out(11 downto 7) := uimm(4 downto 0)
         out(E.rs2Range) := decompressRegIndex(from(4 downto 2))
         out(E.rs1Range) := decompressRegIndex(from(9 downto 7))
       }
@@ -206,7 +207,8 @@ object RiscvDecompressorUtil {
         uimm(6) := from(5)
 
         out := E.SD.value
-        out(31 downto 20) := uimm
+        out(31 downto 25) := uimm(11 downto 5)
+        out(11 downto 7) := uimm(4 downto 0)
         out(E.rs2Range) := decompressRegIndex(from(4 downto 2))
         out(E.rs1Range) := decompressRegIndex(from(9 downto 7))
       }
@@ -419,6 +421,91 @@ object RiscvDecompressorUtil {
         out(31 downto 20) := uimm
         out(E.rdRange) := from(11 downto 7)
         out(E.rs1Range) := from(11 downto 7)
+      }
+      is(M"010-----------10") {
+        // C.LWSP
+        val uimm = B(0, 12 bits)
+        uimm(5) := from(12)
+        uimm(4 downto 2) := from(6 downto 4)
+        uimm(7 downto 6) := from(3 downto 2)
+
+        out := E.LW.value
+        out(31 downto 20) := uimm
+        out(E.rdRange) := from(11 downto 7)
+        out(E.rs1Range) := 2
+      }
+      if (rv64) {
+        is(M"011-----------10") {
+          // C.LDSP
+          val uimm = B(0, 12 bits)
+          uimm(5) := from(12)
+          uimm(4 downto 3) := from(6 downto 5)
+          uimm(8 downto 6) := from(4 downto 2)
+
+          out := E.LW.value
+          out(31 downto 20) := uimm
+          out(E.rdRange) := from(11 downto 7)
+          out(E.rs1Range) := 2
+        }
+      }
+      is(M"1000----------10") {
+        when(from(6 downto 2) === 0) {
+          // C.JR
+          when(from(11 downto 7) === 0) {
+            throwAsIllegal()
+          } otherwise {
+            out := E.JALR.value
+            out(E.rs1Range) := from(11 downto 7)
+          }
+        } otherwise {
+          // C.MV
+          out := E.ADD.value
+          out(E.rs2Range) := from(6 downto 2)
+          out(E.rdRange) := from(11 downto 7)
+        }
+      }
+      is(M"1001----------10") {
+        when(from(6 downto 2) === 0) {
+          when(from(11 downto 7) === 0) {
+            // C.EBREAK - not implemented
+            throwAsIllegal()
+          } otherwise {
+            // C.JALR
+            out := E.JALR.value
+            out(E.rdRange) := 1
+            out(E.rs1Range) := from(11 downto 7)
+          }
+        } otherwise {
+          // C.ADD
+          out := E.ADD.value
+          out(E.rs2Range) := from(6 downto 2)
+          out(E.rs1Range) := from(11 downto 7)
+          out(E.rdRange) := from(11 downto 7)
+        }
+      }
+      is(M"110-----------10") {
+        // C.SWSP
+        val uimm = B(0, 12 bits)
+        uimm(5 downto 2) := from(12 downto 9)
+        uimm(7 downto 6) := from(8 downto 7)
+
+        out := E.SW.value
+        out(31 downto 25) := uimm(11 downto 5)
+        out(11 downto 7) := uimm(4 downto 0)
+        out(E.rs2Range) := from(6 downto 2)
+        out(E.rs1Range) := 2
+      }
+      is(M"111-----------10") {
+        // C.SDSP
+        val uimm = B(0, 12 bits)
+        uimm(5 downto 3) := from(12 downto 10)
+        uimm(8 downto 6) := from(9 downto 7)
+
+        out := E.SD.value
+        out(31 downto 25) := uimm(11 downto 5)
+        out(11 downto 7) := uimm(4 downto 0)
+        out(E.rs2Range) := from(6 downto 2)
+        out(E.rs1Range) := 2
       }
       default {
         throwAsIllegal()
