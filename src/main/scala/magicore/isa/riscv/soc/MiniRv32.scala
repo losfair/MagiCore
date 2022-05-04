@@ -16,6 +16,7 @@ import spinal.lib.com.uart.Uart
 import magicore.lib.mas.MicroarchSampler
 import magicore.lib.mas.Axi4MicroarchSamplerCtrl
 import spinal.lib.misc.InterruptCtrl
+import spinal.lib.misc.plic.PlicMapping
 
 case class MiniRv32() extends Component {
   val debug = false
@@ -30,6 +31,7 @@ case class MiniRv32() extends Component {
     rv64 = rv64,
     ioMemoryRegions = Seq(
       SizeMapping(BigInt("ff000000", 16), 0x800000), // Internal I/O
+      SizeMapping(BigInt("e0000000", 16), 0x4000000), // PLIC
       SizeMapping(BigInt("40000000", 16), 0x10000000) // AXI I/O devices
     )
   )
@@ -139,6 +141,19 @@ case class MiniRv32() extends Component {
     val uart = master(Uart())
   }
 
+  val plicInterruptLine = Bool()
+  val plic = Axi4PlicGenerator(
+    Axi4Config(
+      addressWidth = 32,
+      dataWidth = dataWidth,
+      idWidth = slaveIdWidth
+    )
+  )
+  plic.priorityWidth.load(2)
+  plic.mapping.load(PlicMapping.sifive)
+  plic.addTarget(plicInterruptLine)
+  val plicAxi4 = plic.ctrl.await()
+
   val intrController =
     new Axi4InterruptCtrl(
       width = numExternalInterrupts + numInternalInterrupts,
@@ -149,7 +164,7 @@ case class MiniRv32() extends Component {
   intrController.io.inputs(numExternalInterrupts + 1) := uart.io.interrupt
 
   io.uart <> uart.io.uart
-  processor.io.interrupt.external := intrController.io.pendings.orR
+  processor.io.interrupt.external := intrController.io.pendings.orR | plicInterruptLine
   processor.io.interrupt.timer := clint.io.timerInterrupt(0)
   processor.io.interrupt.software := clint.io.softwareInterrupt(0)
 
@@ -180,7 +195,8 @@ case class MiniRv32() extends Component {
     masCtrlAxi -> SizeMapping(BigInt("ff010100", 16), 0x100),
     intrControllerAxi -> SizeMapping(BigInt("ff010200", 16), 0x100),
     clintAxi -> SizeMapping(BigInt("ff020000", 16), 0x10000),
-    masDataAxi -> SizeMapping(BigInt("fe000000", 16), mas.bufferSizeInBytes)
+    masDataAxi -> SizeMapping(BigInt("fe000000", 16), mas.bufferSizeInBytes),
+    plicAxi4 -> SizeMapping(BigInt("e0000000", 16), 0x4000000)
   )
   axiCrossbar.addConnections(
     processor.io.iBus -> Seq(bootromAxi, ocram.io.axi, extBus),
@@ -192,7 +208,8 @@ case class MiniRv32() extends Component {
       clintAxi,
       intrControllerAxi,
       masCtrlAxi,
-      masDataAxi
+      masDataAxi,
+      plicAxi4
     )
   )
 
