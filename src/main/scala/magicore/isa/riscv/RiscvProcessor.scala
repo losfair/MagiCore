@@ -76,6 +76,9 @@ case class RiscvProcessor(
   val lsu =
     pipeline.lookupFunctionUnitInstancesByType(classOf[LsuInstance]).head
 
+  val decompressor = RiscvDecompressor()
+  decompressor.provide()
+
   val fetch = FetchUnit()
   val decode = RiscvDecoder(
     amo = amo,
