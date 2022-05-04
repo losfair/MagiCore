@@ -152,7 +152,6 @@ case class MiniRv32() extends Component {
   plic.priorityWidth.load(2)
   plic.mapping.load(PlicMapping.sifive)
   plic.addTarget(plicInterruptLine)
-  val plicAxi4 = plic.ctrl.await()
 
   val intrController =
     new Axi4InterruptCtrl(
@@ -162,6 +161,12 @@ case class MiniRv32() extends Component {
   intrController.io.inputs(numExternalInterrupts - 1 downto 0) := io.interrupts
   intrController.io.inputs(numExternalInterrupts + 0) := mas.io.irq
   intrController.io.inputs(numExternalInterrupts + 1) := uart.io.interrupt
+
+  for((input, id) <- intrController.io.inputs.asBools.zipWithIndex) {
+    plic.addInterrupt(input, id)
+  }
+
+  val plicAxi4 = plic.ctrl.await()
 
   io.uart <> uart.io.uart
   processor.io.interrupt.external := intrController.io.pendings.orR | plicInterruptLine
