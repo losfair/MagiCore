@@ -54,15 +54,25 @@ pub unsafe extern "C" fn rust_main() -> ! {
 
 unsafe fn self_test() {
   let atomic_u32 = AtomicU32::new(0);
+  writeln!(UartPort, "[0]").unwrap();
   assert_eq!(test_amo_add_w(&atomic_u32), 0);
+  writeln!(UartPort, "[1]").unwrap();
   assert_eq!(test_amo_add_w(&atomic_u32), 1);
+  writeln!(UartPort, "[2]").unwrap();
   assert_eq!(test_amo_swap_w(&atomic_u32), 2);
+  writeln!(UartPort, "[3] {}", atomic_u32.load(Ordering::Relaxed)).unwrap();
   assert_eq!(atomic_u32.load(Ordering::Relaxed), 35);
+  writeln!(UartPort, "[4]").unwrap();
   assert_eq!(test_amo_max_w(&atomic_u32), 35);
+  writeln!(UartPort, "[5]").unwrap();
   assert_eq!(test_amo_max_w(&atomic_u32), 35);
+  writeln!(UartPort, "[6]").unwrap();
   atomic_u32.store(10, Ordering::Relaxed);
+  writeln!(UartPort, "[7]").unwrap();
   assert_eq!(test_amo_max_w(&atomic_u32), 10);
+  writeln!(UartPort, "[8]").unwrap();
   assert_eq!(atomic_u32.load(Ordering::Relaxed), 22);
+  writeln!(UartPort, "[9]").unwrap();
   do_ecall(42, 0, 0, 0);
 }
 

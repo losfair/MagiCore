@@ -29,6 +29,7 @@ case class MiniRv32() extends Component {
     debug = debug,
     initBranchPredictionBuffers = false,
     rv64 = rv64,
+    compressed = true,
     ioMemoryRegions = Seq(
       SizeMapping(BigInt("ff000000", 16), 0x800000), // Internal I/O
       SizeMapping(BigInt("e0000000", 16), 0x4000000), // PLIC
