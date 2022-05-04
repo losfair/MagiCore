@@ -197,6 +197,7 @@ class TestBackendPipeline extends AnyFunSuite {
       out.replaceOperandBwithConst #= const.isDefined && !doNotUseConst
       out.setPredicateInsteadOfBranch #= setPredicateInsteadOfBranch
       out.brCtx.pc #= 0
+      out.brCtx.halfLinkOffset #= false
       out.brCtx.predictedBranchValid #= predictedBranch.isDefined
       if (predictedBranch.isDefined) {
         out.brCtx.predictedBranchTarget #= predictedBranch.get

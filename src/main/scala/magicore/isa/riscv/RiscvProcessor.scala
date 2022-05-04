@@ -16,7 +16,8 @@ case class RiscvProcessor(
     initBranchPredictionBuffers: Boolean = false,
     rv64: Boolean = false,
     ioMemoryRegions: Seq[SizeMapping] = Seq(),
-    amo: Boolean = true
+    amo: Boolean = true,
+    compressed: Boolean = true
 ) extends Area {
   object FuTag extends SpinalEnum(binarySequential) {
     val ALU, LSU, MUL, DIV, SLOW_ALU, EARLY_EXC, CSR = newElement()
@@ -76,12 +77,15 @@ case class RiscvProcessor(
   val lsu =
     pipeline.lookupFunctionUnitInstancesByType(classOf[LsuInstance]).head
 
-  val decompressor = RiscvDecompressor()
-  decompressor.provide()
+  if (compressed) {
+    val decompressor = RiscvDecompressor()
+    decompressor.provide()
+  }
 
   val fetch = FetchUnit()
   val decode = RiscvDecoder(
     amo = amo,
+    compressed = compressed,
     rv64 = rv64,
     aluPort = FuTag.ALU,
     earlyExceptionPort = FuTag.EARLY_EXC,

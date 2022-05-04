@@ -271,6 +271,7 @@ case class RvAnnotatedFetchPacket() extends Bundle {
 case class RiscvDecoder(
     rv64: Boolean,
     amo: Boolean,
+    compressed: Boolean,
     aluPort: Data,
     earlyExceptionPort: Data,
     lsuPort: Data,
@@ -365,18 +366,18 @@ case class RiscvDecoder(
     val imm = E.IMM(io.input.payload.insn)
     switch(io.input.payload.insn) {
       is(
-        E.BEQ(false),
-        E.BNE(false),
-        E.BLT(false),
-        E.BGE(false),
-        E.BLTU(false),
-        E.BGEU(false)
+        E.BEQ(compressed),
+        E.BNE(compressed),
+        E.BLT(compressed),
+        E.BGE(compressed),
+        E.BLTU(compressed),
+        E.BGEU(compressed)
       ) {
         io.branchInfoFeedback.isConditionalBranch := True
         io.branchInfoFeedback.backward := io.input.payload.insn(31)
         brFeedback_offset := imm.b_sext.asUInt
       }
-      is(E.JAL(false)) {
+      is(E.JAL(compressed)) {
         io.branchInfoFeedback.isUnconditionalStaticBranch := True
         brFeedback_offset := imm.j_sext.asUInt
       }
@@ -391,19 +392,19 @@ case class RiscvDecoder(
 
   switch(insn) {
     is(
-      E.BEQ(false),
-      E.BNE(false),
-      E.BLT(false),
-      E.BGE(false),
-      E.BLTU(false),
-      E.BGEU(false)
+      E.BEQ(compressed),
+      E.BNE(compressed),
+      E.BLT(compressed),
+      E.BGE(compressed),
+      E.BLTU(compressed),
+      E.BGEU(compressed)
     ) {
       out.rs1Valid := True
       out.rs2Valid := True
       out.fuTag := aluPort
       out.immType := ImmType.B
     }
-    is(E.JAL(false)) {
+    is(E.JAL(compressed)) {
       out.rdValid := True
       out.fuTag := aluPort
       out.immType := ImmType.J

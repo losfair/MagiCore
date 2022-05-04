@@ -41,6 +41,7 @@ case class FetchPacket(hasInsn: Boolean = true) extends Bundle with PolymorphicD
   val cacheMiss = Bool()
   val pc = fspec.addrType()
   val insn = if(hasInsn) fspec.insnType() else null
+  val compressed = Bool()
   val pcTag = Bool()
   val globalHistory = fspec.globalHistoryType()
   val predictedBranchValid = Bool()
@@ -54,6 +55,7 @@ case class FetchPacket(hasInsn: Boolean = true) extends Bundle with PolymorphicD
       ctx.pc := pc.asBits
       ctx.predictedBranchValid := predictedBranchValid
       ctx.predictedBranchTarget := predictedBranchTarget.asBits
+      ctx.halfLinkOffset := compressed
       Some(ctx.asInstanceOf[T])
     } else {
       None
@@ -226,6 +228,7 @@ case class FetchUnit() extends Area {
     // `cacheMiss` can be `X` on the first cycle.
     // XXX: Review this.
     data.cacheMiss := icache.io.cpu.fetch.cacheMiss || icache.io.cpu.prefetch.haltIt
+    data.compressed := False
     data.insn := icache.io.cpu.fetch.data
     data.pc := pcFetchStage.pc
     data.pcTag := pcFetchStage.pcTag

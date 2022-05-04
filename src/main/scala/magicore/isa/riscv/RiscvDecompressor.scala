@@ -101,13 +101,13 @@ case class RiscvDecompressor() extends Area {
     val secondValid = state.bufferTop =/= 1
 
     output.setIdle()
+    output.payload.assignSomeByName(first.fetch)
 
     when(firstValid) {
       when(first.data(1 downto 0) === B"11") {
         // Uncompressed - wait & issue
         when(secondValid) {
           output.valid := True
-          output.payload.assignSomeByName(first.fetch)
           output.payload.insn := second.data ## first.data
           when(output.ready) {
             bufferShiftAmount := 2
@@ -116,8 +116,8 @@ case class RiscvDecompressor() extends Area {
       } otherwise {
         // Compressed - decompress & issue
         output.valid := True
-        output.payload.assignSomeByName(first.fetch)
         output.payload.insn := RiscvDecompressorUtil.decompressOnce(first.data)
+        output.payload.compressed := True
         when(output.ready) {
           bufferShiftAmount := 1
         }
@@ -133,6 +133,7 @@ object RiscvDecompressorUtil {
   }
 
   def decompressOnce(from: Bits): Bits = {
+    val rv64 = Machine.get[MachineSpec].dataWidth.value == 64
     val E = RvEncoding
 
     assert(from.getWidth == 16)
@@ -160,7 +161,6 @@ object RiscvDecompressorUtil {
           out(E.rdRange) := decompressRegIndex(from(4 downto 2))
           out(E.rs1Range) := 2
         }
-
       }
       is(M"010-----------00") {
         // C.LW
@@ -209,6 +209,216 @@ object RiscvDecompressorUtil {
         out(31 downto 20) := uimm
         out(E.rs2Range) := decompressRegIndex(from(4 downto 2))
         out(E.rs1Range) := decompressRegIndex(from(9 downto 7))
+      }
+      is(M"000-----------01") {
+        // C.NOP / C.ADDI
+        val imm_ = B(0, 6 bits)
+        imm_(5) := from(12)
+        imm_(4 downto 0) := from(6 downto 2)
+        val imm = imm_.asSInt.resize(12 bits).asBits
+
+        out := E.ADDI.value
+        out(31 downto 20) := imm
+        out(E.rdRange) := from(11 downto 7)
+        out(E.rs1Range) := from(11 downto 7)
+      }
+      if (rv64) {
+        is(M"001-----------01") {
+          // C.ADDIW
+          // Is C.JAL on RV32 - not implemented
+          val imm_ = B(0, 6 bits)
+          imm_(5) := from(12)
+          imm_(4 downto 0) := from(6 downto 2)
+          val imm = imm_.asSInt.resize(12 bits).asBits
+
+          out := E.ADDIW.value
+          out(31 downto 20) := imm
+          out(E.rdRange) := from(11 downto 7)
+          out(E.rs1Range) := from(11 downto 7)
+        }
+      }
+      is(M"010-----------01") {
+        // C.LI
+        val imm_ = B(0, 6 bits)
+        imm_(5) := from(12)
+        imm_(4 downto 0) := from(6 downto 2)
+        val imm = imm_.asSInt.resize(12 bits).asBits
+
+        out := E.ADDI.value
+        out(31 downto 20) := imm
+        out(E.rdRange) := from(11 downto 7)
+      }
+      is(M"011-----------01") {
+        when(from(11 downto 7) === 2) {
+          // C.ADDI16SP
+          val nzimm_ = B(0, 10 bits)
+          nzimm_(9) := from(12)
+          nzimm_(4) := from(6)
+          nzimm_(6) := from(5)
+          nzimm_(8 downto 7) := from(4 downto 3)
+          nzimm_(5) := from(2)
+
+          out := E.ADDI.value
+          out(31 downto 20) := nzimm_.asSInt.resize(12 bits).asBits
+          out(E.rdRange) := decompressRegIndex(from(4 downto 2))
+          out(E.rs1Range) := 2
+        } otherwise {
+          // C.LUI
+          val nzimm_ = B(0, 18 bits)
+          nzimm_(17) := from(12)
+          nzimm_(16 downto 12) := from(6 downto 2)
+          out := E.LUI.value
+          out(31 downto 12) := nzimm_(17 downto 12).asSInt
+            .resize(20 bits)
+            .asBits
+        }
+      }
+      is(M"100-00--------01") {
+        // C.SRLI
+        val uimm = B(0, 12 bits)
+        uimm(5) := from(12)
+        uimm(4 downto 0) := from(6 downto 2)
+
+        out := E.SRLI.value
+        out(31 downto 20) := uimm
+        out(E.rdRange) := decompressRegIndex(from(9 downto 7))
+        out(E.rs1Range) := decompressRegIndex(from(9 downto 7))
+      }
+      is(M"100-01--------01") {
+        // C.SRAI
+        val uimm = B(0, 12 bits)
+        uimm(5) := from(12)
+        uimm(4 downto 0) := from(6 downto 2)
+
+        out := E.SRAI.value
+        out(31 downto 20) := uimm
+        out(E.rdRange) := decompressRegIndex(from(9 downto 7))
+        out(E.rs1Range) := decompressRegIndex(from(9 downto 7))
+      }
+      is(M"100-10--------01") {
+        // C.ANDI
+        val imm_ = B(0, 6 bits)
+        imm_(5) := from(12)
+        imm_(4 downto 0) := from(6 downto 2)
+        val imm = imm_.asSInt.resize(12 bits).asBits
+
+        out := E.ANDI.value
+        out(31 downto 20) := imm
+        out(E.rdRange) := decompressRegIndex(from(9 downto 7))
+        out(E.rs1Range) := decompressRegIndex(from(9 downto 7))
+      }
+      is(M"100011---00---01") {
+        // C.SUB
+        out := E.SUB.value
+        out(E.rdRange) := decompressRegIndex(from(9 downto 7))
+        out(E.rs1Range) := decompressRegIndex(from(9 downto 7))
+        out(E.rs2Range) := decompressRegIndex(from(4 downto 2))
+      }
+      is(M"100011---01---01") {
+        // C.XOR
+        out := E.XOR.value
+        out(E.rdRange) := decompressRegIndex(from(9 downto 7))
+        out(E.rs1Range) := decompressRegIndex(from(9 downto 7))
+        out(E.rs2Range) := decompressRegIndex(from(4 downto 2))
+      }
+      is(M"100011---10---01") {
+        // C.OR
+        out := E.OR.value
+        out(E.rdRange) := decompressRegIndex(from(9 downto 7))
+        out(E.rs1Range) := decompressRegIndex(from(9 downto 7))
+        out(E.rs2Range) := decompressRegIndex(from(4 downto 2))
+      }
+      is(M"100011---11---01") {
+        // C.AND
+        out := E.AND.value
+        out(E.rdRange) := decompressRegIndex(from(9 downto 7))
+        out(E.rs1Range) := decompressRegIndex(from(9 downto 7))
+        out(E.rs2Range) := decompressRegIndex(from(4 downto 2))
+      }
+      is(M"100111---00---01") {
+        // C.SUBW
+        out := E.SUBW.value
+        out(E.rdRange) := decompressRegIndex(from(9 downto 7))
+        out(E.rs1Range) := decompressRegIndex(from(9 downto 7))
+        out(E.rs2Range) := decompressRegIndex(from(4 downto 2))
+      }
+      is(M"100111---01---01") {
+        // C.ADDW
+        out := E.ADDW.value
+        out(E.rdRange) := decompressRegIndex(from(9 downto 7))
+        out(E.rs1Range) := decompressRegIndex(from(9 downto 7))
+        out(E.rs2Range) := decompressRegIndex(from(4 downto 2))
+      }
+      is(M"101-----------01") {
+        // C.J
+        val imm_ = B(0, 12 bits)
+        imm_(11) := from(12)
+        imm_(4) := from(11)
+        imm_(9 downto 8) := from(10 downto 9)
+        imm_(10) := from(8)
+        imm_(6) := from(7)
+        imm_(7) := from(6)
+        imm_(3 downto 1) := from(5 downto 3)
+        imm_(5) := from(2)
+
+        val imm = imm_.asSInt.resize(21 bits).asBits
+
+        val target = B(0, 32 bits)
+        target(31) := imm(20)
+        target(30 downto 21) := imm(10 downto 1)
+        target(20) := imm(11)
+        target(19 downto 12) := imm(19 downto 12)
+
+        out := E.JAL(true).value
+        out(31 downto 12) := target(31 downto 12)
+        out(E.rdRange) := 0
+      }
+      is(M"110-----------01") {
+        // C.BEQZ
+        val imm_ = B(0, 9 bits)
+        imm_(8) := from(12)
+        imm_(4 downto 3) := from(11 downto 10)
+        imm_(7 downto 6) := from(6 downto 5)
+        imm_(2 downto 1) := from(4 downto 3)
+        imm_(5) := from(2)
+
+        val imm = imm_.asSInt.resize(13 bits).asBits
+
+        out := E.BEQ(true).value
+        out(31) := imm(12)
+        out(30 downto 25) := imm(10 downto 5)
+        out(11 downto 8) := imm(4 downto 1)
+        out(7) := imm(11)
+        out(E.rs1Range) := decompressRegIndex(from(9 downto 7))
+      }
+      is(M"111-----------01") {
+        // C.BNEZ
+        val imm_ = B(0, 9 bits)
+        imm_(8) := from(12)
+        imm_(4 downto 3) := from(11 downto 10)
+        imm_(7 downto 6) := from(6 downto 5)
+        imm_(2 downto 1) := from(4 downto 3)
+        imm_(5) := from(2)
+
+        val imm = imm_.asSInt.resize(13 bits).asBits
+
+        out := E.BNE(true).value
+        out(31) := imm(12)
+        out(30 downto 25) := imm(10 downto 5)
+        out(11 downto 8) := imm(4 downto 1)
+        out(7) := imm(11)
+        out(E.rs1Range) := decompressRegIndex(from(9 downto 7))
+      }
+      is(M"000-----------10") {
+        // C.SLLI
+        val uimm = B(0, 12 bits)
+        uimm(5) := from(12)
+        uimm(4 downto 0) := from(6 downto 2)
+
+        out := E.SLLI.value
+        out(31 downto 20) := uimm
+        out(E.rdRange) := from(11 downto 7)
+        out(E.rs1Range) := from(11 downto 7)
       }
       default {
         throwAsIllegal()
