@@ -333,9 +333,23 @@ case class RiscvDecoder(
   ).asUInt =/= 0 || inputStream.payload.unsuppressRd)
   outPatched.assignUnassignedByName(out)
 
+  when(out.fetch.cacheError) {
+    outPatched.fuTag := earlyExceptionPort
+    outPatched.earlyExc.code := MachineExceptionCode.INSN_MEMORY_ERROR
+    wantStall := True
+  }
+
   when(out.fetch.cacheMiss) {
     outPatched.fuTag := earlyExceptionPort
     outPatched.earlyExc.code := MachineExceptionCode.INSN_CACHE_MISS
+    wantStall := True
+  }
+
+  val pcMisaligned =
+    if (compressed) out.fetch.pc(0) else out.fetch.pc(1 downto 0).orR
+  when(pcMisaligned) {
+    outPatched.fuTag := earlyExceptionPort
+    outPatched.earlyExc.code := MachineExceptionCode.INSN_ALIGNMENT_ERROR
     wantStall := True
   }
 

@@ -409,6 +409,14 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
               // Load access fault
               restartIntoException(5, exc.memoryError_accessAddr.asUInt)
             }
+            is(MachineExceptionCode.INSN_ALIGNMENT_ERROR) {
+              // Instruction address misaligned
+              restartIntoException(0, 0)
+            }
+            is(MachineExceptionCode.INSN_MEMORY_ERROR) {
+              // Instruction access fault
+              restartIntoException(1, 0)
+            }
             is(MachineExceptionCode.LOAD_ALIGNMENT_ERROR) {
               // Load address misaligned
               restartIntoException(4, exc.memoryError_accessAddr.asUInt)

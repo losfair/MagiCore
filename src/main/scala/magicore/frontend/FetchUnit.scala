@@ -40,6 +40,8 @@ case class FetchPacket(hasInsn: Boolean = true)
   private val fspec = Machine.get[FrontendSpec]
   def parentObjects = Seq()
 
+  val cacheError = Bool()
+
   val cacheMiss = Bool()
   val cacheMissOffset =
     if (fspec.compressed) UInt(log2Up(fspec.addrStep) bits) else null
@@ -231,6 +233,8 @@ case class FetchUnit() extends Area {
 
     private val data = FetchPacket()
 
+    data.cacheError := icache.io.cpu.fetch.error
+
     // `cacheMiss` can be `X` on the first cycle.
     // XXX: Review this.
     data.cacheMiss := icache.io.cpu.fetch.cacheMiss || icache.io.cpu.prefetch.haltIt
@@ -252,6 +256,9 @@ case class FetchUnit() extends Area {
     icache.io.cpu.fetch.isStuck := dataStream.isStall
     icache.io.cpu.fetch.isRemoved := False // ???
     icache.io.cpu.fetch.mmuRsp.physicalAddress := pcFetchStage.pc & fspec.addrMask
+    icache.io.cpu.fetch.mmuRsp.exception := False
+    icache.io.cpu.fetch.mmuRsp.allowExecute := True
+    icache.io.cpu.fetch.mmuRsp.isPaging := False
 
     val decompressor = Machine.tryGet[FetchDecompressor]
     if (decompressor.isDefined) {
