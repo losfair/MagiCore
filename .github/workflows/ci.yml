@@ -14,6 +14,18 @@ jobs:
       with:
         distribution: temurin
         java-version: 8
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+    - name: Build FSBL
+      run: |
+        set -e
+        cargo install cargo-xbuild
+        cd fsbl
+        ./build.sh 64
+        ./build.sh 32
     - name: Generate
       run: |
         sbt "runMain magicore.isa.riscv.soc.Gen_All"

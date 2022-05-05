@@ -120,7 +120,8 @@ class TestRiscvDecompressor extends AnyFunSuite {
       resetPc = 0,
       globalHistorySize = 4096,
       btbSize = 128,
-      initBranchPredictionBuffers = false
+      initBranchPredictionBuffers = false,
+      compressed = true
     )
     Machine.provide(mspec)
     Machine.provide(fspec)
