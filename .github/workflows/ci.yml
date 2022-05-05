@@ -4,6 +4,52 @@ on:
   schedule:
   - cron: '10 * * * *'
 jobs:
+  build-socs:
+    runs-on: ubuntu-20.04
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+    - name: Setup JDK
+      uses: actions/setup-java@v2
+      with:
+        distribution: temurin
+        java-version: 8
+    - name: Generate
+      run: |
+        sbt "runMain magicore.isa.riscv.soc.Gen_All"
+        mkdir output
+        cp ./*.v ./*.bin ./output/
+    - name: Upload
+      uses: actions/upload-artifact@v2
+      with:
+        name: socs
+        path: ./output
+  system-test:
+    runs-on: ubuntu-20.04
+    needs: build-socs
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+    - name: Fetch RTL
+      uses: actions/download-artifact@v2
+      with:
+        name: socs
+        path: socs
+    - name: List RTL
+      run: |
+        ls -lash socs
+    - name: Install dependencies
+      run: pip3 install -r ./validation/requirements.txt
+    - name: Install verilator
+      run: |
+        sudo apt-get install -y git perl python3 make autoconf g++ flex bison ccache libgoogle-perftools-dev numactl perl-doc libfl-dev libfl2 zlibc zlib1g zlib1g-dev
+        git clone https://github.com/verilator/verilator
+        cd verilator
+        git checkout v4.106
+        autoconf
+        ./configure
+        make -j `nproc`
+        sudo make install
   test:
     runs-on: ubuntu-20.04
     steps:
@@ -28,3 +74,33 @@ jobs:
         sudo make install
     - name: Test
       run: sbt test
+  release:
+    name: Create release
+    runs-on: ubuntu-20.04
+    needs:
+      - build-socs
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - uses: actions/download-artifact@v2
+        with:
+          name: socs
+          path: socs
+      - name: Package
+        run: |
+          set -e
+          ./scripts/package_once.sh MagiSoC_RV32IM
+          ./scripts/package_once.sh MagiSoC_RV32IMA
+          ./scripts/package_once.sh MagiSoC_RV64IMA
+          ./scripts/package_once.sh MagiSoC_RV64IMA_Bus32
+          ls -lash *.tar.xz
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          draft: true
+          files: |
+            MagiSoC_RV32IM.tar.xz
+            MagiSoC_RV32IMA.tar.xz
+            MagiSoC_RV64IMA.tar.xz
+            MagiSoC_RV64IMA_Bus32.tar.xz
