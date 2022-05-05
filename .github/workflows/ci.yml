@@ -23,6 +23,7 @@ jobs:
     - name: Build FSBL
       run: |
         set -e
+        apt-get install -y llvm
         rustup component add rust-src
         cargo install cargo-xbuild
         cd fsbl
