@@ -15,16 +15,6 @@ pub fn write_byte(x: u8) {
   }
 }
 
-pub fn read_byte() -> Option<u8> {
-  unsafe {
-    if io_read(UART_RW_CAPACITY) == 0 {
-      None
-    } else {
-      Some(io_read(UART_RW_PORT) as u8)
-    }
-  }
-}
-
 pub struct UartPort;
 
 impl Write for UartPort {

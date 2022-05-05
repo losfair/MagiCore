@@ -1,4 +1,8 @@
-[target.riscv64im-unknown-none-elf]
+[target.riscv64ima-unknown-none-elf]
+rustflags = [
+    "-C", "link-arg=-Tlinker.ld", # Use our own linker script.
+]
+[target.riscv32ima-unknown-none-elf]
 rustflags = [
     "-C", "link-arg=-Tlinker.ld", # Use our own linker script.
 ]
