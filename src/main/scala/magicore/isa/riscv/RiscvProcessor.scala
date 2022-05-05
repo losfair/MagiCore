@@ -61,7 +61,7 @@ case class RiscvProcessor(
   val intrSvc = RvInterruptService()
   Machine.provide(intrSvc)
 
-  val csr = RvCsrFileReg()
+  val csr = RvCsrFileReg(amo = amo)
   csr.provide()
 
   val msem = new MachineSemantics {

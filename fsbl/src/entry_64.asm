@@ -35,21 +35,3 @@ _start:
     li x31, 0
     li sp, 0x24000
     call rust_main
-
-.globl test_amo_add_w
-test_amo_add_w:
-    li t0, 1
-    amoadd.w a0, t0, (a0)
-    ret
-
-.globl test_amo_swap_w
-test_amo_swap_w:
-    li t0, 35
-    amoswap.w a0, t0, (a0)
-    ret
-
-.globl test_amo_max_w
-test_amo_max_w:
-    li t0, 22
-    amomax.w a0, t0, (a0)
-    ret

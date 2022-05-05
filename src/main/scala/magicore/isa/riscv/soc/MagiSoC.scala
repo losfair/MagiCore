@@ -18,10 +18,13 @@ import magicore.lib.mas.Axi4MicroarchSamplerCtrl
 import spinal.lib.misc.InterruptCtrl
 import spinal.lib.misc.plic.PlicMapping
 
-case class MiniRv32() extends Component {
-  val debug = false
-  val rv64 = true
-  val downsizeExternalBus = false
+class MagiSoC(
+    debug: Boolean,
+    rv64: Boolean,
+    amo: Boolean,
+    downsizeExternalBus: Boolean,
+    bootrom: String
+) extends Component {
   val dataWidth = if (rv64) 64 else 32
 
   val processor = RiscvProcessor(
@@ -30,6 +33,7 @@ case class MiniRv32() extends Component {
     initBranchPredictionBuffers = false,
     rv64 = rv64,
     compressed = false,
+    amo = amo,
     ioMemoryRegions = Seq(
       SizeMapping(BigInt("ff000000", 16), 0x800000), // Internal I/O
       SizeMapping(BigInt("e0000000", 16), 0x4000000), // PLIC
@@ -42,8 +46,8 @@ case class MiniRv32() extends Component {
   val numInternalInterrupts = 2
 
   val bootromBackingStore =
-    if (rv64) Mem(Bits(64 bits), 2048) else Mem(Bits(32 bits), 4096)
-  bootromBackingStore.initFromFile("./fsbl/firmware.bin")
+    if (rv64) Mem(Bits(64 bits), 1024) else Mem(Bits(32 bits), 2048)
+  bootromBackingStore.initFromFile(bootrom)
   val bootromAxi = Axi4Rom(
     mem = bootromBackingStore,
     config = Axi4Config(
@@ -163,7 +167,7 @@ case class MiniRv32() extends Component {
   intrController.io.inputs(numExternalInterrupts + 0) := mas.io.irq
   intrController.io.inputs(numExternalInterrupts + 1) := uart.io.interrupt
 
-  for((input, id) <- intrController.io.inputs.asBools.zipWithIndex) {
+  for ((input, id) <- intrController.io.inputs.asBools.zipWithIndex) {
     plic.addInterrupt(input, id)
   }
 
@@ -269,16 +273,66 @@ case class MiniRv32() extends Component {
   axiCrossbar.build()
 }
 
-object MiniRv32SyncReset {
-  object SyncResetSpinalConfig
-      extends SpinalConfig(
-        defaultConfigForClockDomains = ClockDomainConfig(resetKind = SYNC),
-        defaultClockDomainFrequency = FixedFrequency(80 MHz)
-      )
+class MagiSoC_RV32IM()
+    extends MagiSoC(
+      debug = false,
+      rv64 = false,
+      amo = false,
+      downsizeExternalBus = false,
+      bootrom = "./fsbl/firmware_32.bin"
+    )
 
+class MagiSoC_RV32IMA()
+    extends MagiSoC(
+      debug = false,
+      rv64 = false,
+      amo = true,
+      downsizeExternalBus = false,
+      bootrom = "./fsbl/firmware_32.bin"
+    )
+
+class MagiSoC_RV64IMA()
+    extends MagiSoC(
+      debug = false,
+      rv64 = true,
+      amo = true,
+      downsizeExternalBus = false,
+      bootrom = "./fsbl/firmware_64.bin"
+    )
+
+class MagiSoC_RV64IMA_Bus32()
+    extends MagiSoC(
+      debug = false,
+      rv64 = true,
+      amo = true,
+      downsizeExternalBus = true,
+      bootrom = "./fsbl/firmware_64.bin"
+    )
+
+object SyncResetSpinalConfig
+    extends SpinalConfig(
+      defaultConfigForClockDomains = ClockDomainConfig(resetKind = SYNC),
+      defaultClockDomainFrequency = FixedFrequency(80 MHz)
+    )
+
+class Gen_Base(gen: => Component) {
   def main(args: Array[String]) {
     SyncResetSpinalConfig.generateVerilog(Machine.build {
-      new MiniRv32()
+      gen
     })
+  }
+}
+
+object Gen_MagiSoC_RV32IM extends Gen_Base(new MagiSoC_RV32IM)
+object Gen_MagiSoC_RV32IMA extends Gen_Base(new MagiSoC_RV32IMA)
+object Gen_MagiSoC_RV64IMA extends Gen_Base(new MagiSoC_RV64IMA)
+object Gen_MagiSoC_RV64IMA_Bus32 extends Gen_Base(new MagiSoC_RV64IMA_Bus32)
+
+object Gen_All {
+  def main(args: Array[String]) {
+    Gen_MagiSoC_RV32IM.main(args)
+    Gen_MagiSoC_RV32IMA.main(args)
+    Gen_MagiSoC_RV64IMA.main(args)
+    Gen_MagiSoC_RV64IMA_Bus32.main(args)
   }
 }

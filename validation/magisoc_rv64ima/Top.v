@@ -37,7 +37,7 @@ module Top(
   input core_interrupts
 );
 
-MiniRv32 soc_1(
+MagiSoC_RV64IMA soc_1(
   .clk(clk),
   .reset(rst),
   .io_bus_aw_valid(dBus_awvalid),

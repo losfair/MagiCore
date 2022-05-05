@@ -22,7 +22,7 @@ import spinal.lib.fsm._
 import scala.collection.mutable.ArrayBuffer
 
 object ImmType extends SpinalEnum(binarySequential) {
-  private val mspec = Machine.get[MachineSpec]
+  private def mspec = Machine.get[MachineSpec]
 
   val X, I, H, S, B, J, U =
     newElement()
