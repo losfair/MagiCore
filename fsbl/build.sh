@@ -10,9 +10,9 @@ fi
 
 echo "Building for $MODE-bit mode."
 
-cargo xbuild --release --target ./riscv${MODE}im-unknown-none-elf.json
+cargo xbuild --release --target ./riscv${MODE}ima-unknown-none-elf.json
 llvm-objcopy \
-  ./target/riscv${MODE}im-unknown-none-elf/release/fsbl \
+  ./target/riscv${MODE}ima-unknown-none-elf/release/fsbl \
   --binary-architecture=riscv${MODE} --strip-all -O binary \
-  firmware.bin
-llvm-objdump --mattr=+m,+a -D ./target/riscv${MODE}im-unknown-none-elf/release/fsbl > firmware.dump
+  firmware_${MODE}.bin
+llvm-objdump --mattr=+m,+a -D ./target/riscv${MODE}ima-unknown-none-elf/release/fsbl > firmware_${MODE}.dump

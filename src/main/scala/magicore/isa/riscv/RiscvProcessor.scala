@@ -16,8 +16,12 @@ case class RiscvProcessor(
     initBranchPredictionBuffers: Boolean = false,
     rv64: Boolean = false,
     ioMemoryRegions: Seq[SizeMapping] = Seq(),
-    amo: Boolean = true
+    amo: Boolean = true,
+    compressed: Boolean = false
 ) extends Area {
+  if(!rv64 && compressed) {
+    throw new Exception("RV32 with compressed is not supported")
+  }
   object FuTag extends SpinalEnum(binarySequential) {
     val ALU, LSU, MUL, DIV, SLOW_ALU, EARLY_EXC, CSR = newElement()
   }
@@ -45,7 +49,8 @@ case class RiscvProcessor(
     resetPc = resetPc,
     globalHistorySize = 4096,
     btbSize = 128,
-    initBranchPredictionBuffers = initBranchPredictionBuffers
+    initBranchPredictionBuffers = initBranchPredictionBuffers,
+    compressed = compressed
   )
 
   Machine.provide(mspec)
@@ -56,7 +61,7 @@ case class RiscvProcessor(
   val intrSvc = RvInterruptService()
   Machine.provide(intrSvc)
 
-  val csr = RvCsrFileReg()
+  val csr = RvCsrFileReg(amo = amo)
   csr.provide()
 
   val msem = new MachineSemantics {
@@ -76,9 +81,15 @@ case class RiscvProcessor(
   val lsu =
     pipeline.lookupFunctionUnitInstancesByType(classOf[LsuInstance]).head
 
+  if (compressed) {
+    val decompressor = RiscvDecompressor()
+    decompressor.provide()
+  }
+
   val fetch = FetchUnit()
   val decode = RiscvDecoder(
     amo = amo,
+    compressed = compressed,
     rv64 = rv64,
     aluPort = FuTag.ALU,
     earlyExceptionPort = FuTag.EARLY_EXC,

@@ -20,6 +20,7 @@ case class AluBranchContext(
   def parentObjects = Seq()
 
   val pc = Bits(spec.addrWidth)
+  val halfLinkOffset = Bool()
   val predictedBranchValid = Bool()
   val predictedBranchTarget = Bits(spec.addrWidth)
 }
@@ -159,7 +160,10 @@ class Alu(staticTagData: => Data, c: AluConfig) extends FunctionUnit {
       outValue.assignDontCare()
 
       val linkValue =
-        if (brCtx.isDefined) brCtx.get.pc.asUInt + c.linkOffset else null
+        if (brCtx.isDefined) brCtx.get.pc.asUInt + brCtx.get.halfLinkOffset.mux(
+          True -> U(c.linkOffset / 2, brCtx.get.pc.getWidth bits),
+          False -> U(c.linkOffset, brCtx.get.pc.getWidth bits)
+        ) else null
       val pcAddConst =
         if (brCtx.isDefined)
           (brCtx.get.pc.asSInt + op.const.asSInt.resized).asUInt

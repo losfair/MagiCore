@@ -85,7 +85,7 @@ case class RvMstatus() extends Bundle {
   }
 }
 
-case class RvCsrFileReg() extends Area {
+case class RvCsrFileReg(amo: Boolean) extends Area {
   val csrFile = Reg(RvCsrFile()) init (RvCsrFile.init)
 
   csrFile.mcycle := csrFile.mcycle + 1
@@ -295,7 +295,7 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
       misa(20) := True // U
       misa(12) := True // M
       misa(8) := True // I
-      misa(0) := True // A
+      misa(0) := Bool(csr.amo) // A
       intent.on(
         Seq(0x301),
         misa
