@@ -19,6 +19,7 @@ jobs:
       with:
         profile: minimal
         toolchain: nightly-2022-04-24
+        default: true
     - name: Build FSBL
       run: |
         set -e
