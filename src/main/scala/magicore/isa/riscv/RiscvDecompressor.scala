@@ -188,7 +188,22 @@ case class RiscvDecompressor() extends Area {
             first.fetch.predictedBranchValid === second.fetch.predictedBranchValid,
             "inconsistent PBV"
           )
-          output.payload.predictedBranchValid := False
+
+          switch(output.payload.insn) {
+            is(
+              RvEncoding.JAL(true),
+              RvEncoding.JALR,
+              RvEncoding.BEQ(true),
+              RvEncoding.BNE(true)
+            ) {
+              when(output.fire && first.fetch.predictedBranchValid) {
+                bufferShiftAmount := 2
+              }
+            }
+            default {
+              output.payload.predictedBranchValid := False
+            }
+          }
         }
       }
     }
