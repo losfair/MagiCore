@@ -41,11 +41,12 @@ case class FetchPacket(hasInsn: Boolean = true)
   def parentObjects = Seq()
 
   val cacheMiss = Bool()
-  val cacheMissOffset = UInt(log2Up(fspec.addrStep) bits)
-  val decompressionIntegrityError = Bool()
+  val cacheMissOffset =
+    if (fspec.compressed) UInt(log2Up(fspec.addrStep) bits) else null
+  val decompressionIntegrityError = if (fspec.compressed) Bool() else null
   val pc = fspec.addrType()
   val insn = if (hasInsn) fspec.insnType() else null
-  val compressed = Bool()
+  val compressed = if (fspec.compressed) Bool() else null
   val pcTag = Bool()
   val globalHistory = fspec.globalHistoryType()
   val predictedBranchValid = Bool()
@@ -59,7 +60,8 @@ case class FetchPacket(hasInsn: Boolean = true)
       ctx.pc := pc.asBits
       ctx.predictedBranchValid := predictedBranchValid
       ctx.predictedBranchTarget := predictedBranchTarget.asBits
-      ctx.halfLinkOffset := compressed
+      if (compressed != null) ctx.halfLinkOffset := compressed
+      else ctx.halfLinkOffset := False
       Some(ctx.asInstanceOf[T])
     } else {
       None
@@ -232,9 +234,10 @@ case class FetchUnit() extends Area {
     // `cacheMiss` can be `X` on the first cycle.
     // XXX: Review this.
     data.cacheMiss := icache.io.cpu.fetch.cacheMiss || icache.io.cpu.prefetch.haltIt
-    data.cacheMissOffset := 0
-    data.compressed := False
-    data.decompressionIntegrityError := False
+    if (data.cacheMissOffset != null) data.cacheMissOffset := 0
+    if (data.compressed != null) data.compressed := False
+    if (data.decompressionIntegrityError != null)
+      data.decompressionIntegrityError := False
     data.insn := icache.io.cpu.fetch.data
     data.pc := pcFetchStage.pc
     data.pcTag := pcFetchStage.pcTag
@@ -281,8 +284,6 @@ case class FetchUnit() extends Area {
           out.payload.pc,
           " cacheMiss=",
           out.payload.cacheMiss,
-          " cacheMissOffset=",
-          out.payload.cacheMissOffset,
           " insn=",
           out.payload.insn,
           " pcTag=",
@@ -325,10 +326,11 @@ case class FetchUnit() extends Area {
     )
 
     // Fast retry
-    when(s1.preOut.payload.decompressionIntegrityError) {
-      s1.preOut.ready := True
-      s1.out.valid := False
-    }
+    if (s1.preOut.payload.decompressionIntegrityError != null)
+      when(s1.preOut.payload.decompressionIntegrityError) {
+        s1.preOut.ready := True
+        s1.out.valid := False
+      }
 
     when(s1.preOut.fire) {
       val decision = False
@@ -357,18 +359,23 @@ case class FetchUnit() extends Area {
       // Reschedule if:
       // - Our decision is different from the low-latency predictor's one, and
       // - This branch is not a dynamic branch (in which case we are not able to make a prediction)
-      val reschedule =
+      val reschedule = Bool()
+      reschedule :=
         (decision =/= s1.preOut.payload.predictedBranchValid ||
           (
             decision && io.branchInfoFeedback.target =/= s1.preOut.payload.predictedBranchTarget
           )) && !io.branchInfoFeedback.isUnconditionalDynamicBranch
 
-      when(s1.preOut.payload.decompressionIntegrityError) {
-        // Fast retry path
-        s1.rescheduleTag := !s1.rescheduleTag
-        pcStreamGen.pc.pc := s1.preOut.payload.pc
-        pcStreamGen.pc.pcTag := !s1.rescheduleTag
-      } elsewhen (reschedule) {
+      if (s1.preOut.payload.decompressionIntegrityError != null)
+        when(s1.preOut.payload.decompressionIntegrityError) {
+          // Fast retry path
+          s1.rescheduleTag := !s1.rescheduleTag
+          pcStreamGen.pc.pc := s1.preOut.payload.pc
+          pcStreamGen.pc.pcTag := !s1.rescheduleTag
+          reschedule := False
+        }
+
+      when(reschedule) {
         rescheduleApplied := True
         val next = decision.mux(
           True -> io.branchInfoFeedback.target,
@@ -423,7 +430,11 @@ case class FetchUnit() extends Area {
     val icacheMiss =
       exc.exc.valid && exc.exc.code === MachineExceptionCode.INSN_CACHE_MISS
     icache.io.cpu.fill.valid := icacheMiss
-    icache.io.cpu.fill.payload := fetch.pc + fetch.cacheMissOffset
+    if (fetch.cacheMissOffset != null) {
+      icache.io.cpu.fill.payload := fetch.pc + fetch.cacheMissOffset
+    } else {
+      icache.io.cpu.fill.payload := fetch.pc
+    }
     val waitingRefill = Reg(
       Bool()
     ) init (false) clearWhen (!icache.io.cpu.prefetch.haltIt) setWhen (icache.io.cpu.fill.valid)

@@ -13,7 +13,8 @@ case class FrontendSpec(
     resetPc: BigInt = 0x0,
     globalHistorySize: Int = 1024,
     btbSize: Int = 64,
-    initBranchPredictionBuffers: Boolean = false
+    initBranchPredictionBuffers: Boolean = false,
+    compressed: Boolean = false
 ) {
   val insnType = HardType(Bits(insnWidth))
   val addrType = HardType(UInt(addrWidth))

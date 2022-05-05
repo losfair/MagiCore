@@ -49,7 +49,8 @@ case class RiscvProcessor(
     resetPc = resetPc,
     globalHistorySize = 4096,
     btbSize = 128,
-    initBranchPredictionBuffers = initBranchPredictionBuffers
+    initBranchPredictionBuffers = initBranchPredictionBuffers,
+    compressed = compressed
   )
 
   Machine.provide(mspec)
