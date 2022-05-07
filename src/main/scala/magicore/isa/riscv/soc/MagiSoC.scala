@@ -18,6 +18,10 @@ import magicore.lib.mas.Axi4MicroarchSamplerCtrl
 import spinal.lib.misc.InterruptCtrl
 import spinal.lib.misc.plic.PlicMapping
 
+case class MagiSoC_MonitorPort() extends Bundle {
+  val retire = Vec(Flow(UInt(32 bits)), 2)
+}
+
 class MagiSoC(
     debug: Boolean,
     rv64: Boolean,
@@ -132,6 +136,13 @@ class MagiSoC(
   val masCtrl =
     new Axi4MicroarchSamplerCtrl(sampler = mas, idWidth = slaveIdWidth)
 
+  val monitor = MagiSoC_MonitorPort()
+  monitor.retire := Vec(
+    processor.pipeline.dispatch.io.writebackMonitor.map(x =>
+      x.translateWith(x.payload.lookup[FetchPacket].pc)
+    )
+  )
+
   val io = new Bundle {
     val bus = master(
       Axi4(
@@ -144,7 +155,9 @@ class MagiSoC(
     )
     val interrupts = in(Bits(numExternalInterrupts bits))
     val uart = master(Uart())
+    val monitor = out(MagiSoC_MonitorPort())
   }
+  io.monitor := monitor
 
   val plicInterruptLine = Bool()
   val plic = Axi4PlicGenerator(
