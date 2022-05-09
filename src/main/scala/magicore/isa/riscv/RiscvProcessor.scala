@@ -9,6 +9,8 @@ import magicore.frontend._
 import magicore.lib.funit._
 import spinal.lib.bus.amba4.axi._
 import spinal.lib.bus.misc.SizeMapping
+import magicore.isa.ebpf.EbpfTransform
+import magicore.isa.util.TransformSelector
 
 case class RiscvProcessor(
     resetPc: BigInt = 0x0,
@@ -19,7 +21,7 @@ case class RiscvProcessor(
     amo: Boolean = true,
     compressed: Boolean = false
 ) extends Area {
-  if(!rv64 && compressed) {
+  if (!rv64 && compressed) {
     throw new Exception("RV32 with compressed is not supported")
   }
   object FuTag extends SpinalEnum(binarySequential) {
@@ -84,6 +86,21 @@ case class RiscvProcessor(
   if (compressed) {
     val decompressor = RiscvDecompressor()
     decompressor.provide()
+  } else {
+    val ebpf = EbpfTransform()
+    val decodeMode = UInt(csr.csrFile.decodeMode.getWidth bits)
+    when(csr.csrFile.priv === RvPrivLevel.U) {
+      decodeMode := csr.csrFile.decodeMode
+    } otherwise {
+      decodeMode := 0
+    }
+    val transformSelector = TransformSelector.create(
+      decodeMode,
+      Seq(
+        1 -> ebpf.getTransform()
+      )
+    )
+    Machine.provide(transformSelector)
   }
 
   val fetch = FetchUnit()

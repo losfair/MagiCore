@@ -73,7 +73,7 @@ case class FetchPacket(hasInsn: Boolean = true)
 
 case class FetchRestartSignal(valid: Bool, pc: UInt)
 
-case class FetchDecompressor(
+case class PostFetchTransform(
     input: Stream[FetchPacket],
     output: Stream[FetchPacket],
     latency: Int
@@ -260,12 +260,12 @@ case class FetchUnit() extends Area {
     icache.io.cpu.fetch.mmuRsp.allowExecute := True
     icache.io.cpu.fetch.mmuRsp.isPaging := False
 
-    val decompressor = Machine.tryGet[FetchDecompressor]
-    if (decompressor.isDefined) {
-      println("Fetch decompressor enabled.")
-      decompressor.get.input << dataStream
-      decompressor.get.output.throwWhen(
-        decompressor.get.output.payload.pcTag =/= rescheduleTag
+    val transform = Machine.tryGet[PostFetchTransform]
+    if (transform.isDefined) {
+      println("Post-fetch transform enabled.")
+      transform.get.input << dataStream
+      transform.get.output.throwWhen(
+        transform.get.output.payload.pcTag =/= rescheduleTag
       ) >> preOut
     } else {
       dataStream.throwWhen(

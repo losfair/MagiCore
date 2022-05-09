@@ -27,6 +27,7 @@ object RvCsrFile {
     x.mstatus.mpp := RvPrivLevel.M
     x.custom_mcachedisable := True
     x.internal_scratch0 := 0
+    x.decodeMode := 0
     x
   }
 }
@@ -54,6 +55,8 @@ case class RvCsrFile() extends Bundle {
 
   val custom_mcachedisable = Bool()
   val internal_scratch0 = UInt(spec.dataWidth)
+
+  val decodeMode = UInt(3 bits)
 }
 
 case class RvMstatus() extends Bundle {
@@ -126,7 +129,8 @@ case class RvCsrFileIntent(data: Stream[_ <: PolymorphicDataChain])
       value: Bits,
       write: (Bits) => Unit = null,
       priv: Seq[SpinalEnumElement[RvPrivLevel.type]] = Seq(RvPrivLevel.M),
-      microOpOnly: Boolean = false
+      microOpOnly: Boolean = false,
+      preWrite: (Bits) => Unit = null
   ): Unit = {
     val accessOk =
       if (microOpOnly) decode.isMicroOp
@@ -136,6 +140,7 @@ case class RvCsrFileIntent(data: Stream[_ <: PolymorphicDataChain])
       switch(op) {
         is(B"01") {
           // CSRRW
+          if (preWrite != null) preWrite(src)
           if (write != null) when(data.fire) { write(src) }
           out := value.resized
           ok := True
@@ -143,6 +148,7 @@ case class RvCsrFileIntent(data: Stream[_ <: PolymorphicDataChain])
         is(B"10") {
           // CSRRS
           val newValue = value | src.resized
+          if (preWrite != null) preWrite(newValue)
           if (write != null) when(data.fire) { write(newValue) }
           out := value.resized
           ok := True
@@ -150,6 +156,7 @@ case class RvCsrFileIntent(data: Stream[_ <: PolymorphicDataChain])
         is(B"11") {
           // CSRRC
           val newValue = value & (~src).resized
+          if (preWrite != null) preWrite(newValue)
           if (write != null) when(data.fire) { write(newValue) }
           out := value.resized
           ok := True
@@ -349,6 +356,13 @@ class RvCsr(staticTagData: => Data) extends FunctionUnit {
         Seq(0x7c0),
         csr.csrFile.custom_mcachedisable.asBits,
         x => csr.csrFile.custom_mcachedisable := x(0)
+      )
+
+      // mdecodemode
+      intent.on(
+        Seq(0x7c1),
+        csr.csrFile.decodeMode.asBits,
+        x => csr.csrFile.decodeMode := x(0).asUInt.resized
       )
 
       // internal.scratch0

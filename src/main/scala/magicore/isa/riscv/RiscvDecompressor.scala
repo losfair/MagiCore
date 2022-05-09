@@ -34,7 +34,7 @@ case class RiscvDecompressor() extends Area {
 
   def provide() {
     Machine.provide(
-      FetchDecompressor(input = input, output = output, latency = 1)
+      PostFetchTransform(input = input, output = output, latency = 1)
     )
   }
 

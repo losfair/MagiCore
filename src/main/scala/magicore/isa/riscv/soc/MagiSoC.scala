@@ -306,7 +306,7 @@ class MagiSoC_RV32IMA()
 
 class MagiSoC_RV64IMA()
     extends MagiSoC(
-      debug = false,
+      debug = true,
       rv64 = true,
       amo = true,
       downsizeExternalBus = false,
